@@ -4,3 +4,6 @@ _build/
 target/
 *.mbti
 .DS_Store
+
+# 浏览器验收壳的构建产物，由 tools/build_web.mjs 生成
+examples/web/web.wasm

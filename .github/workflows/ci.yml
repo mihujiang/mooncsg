@@ -58,6 +58,12 @@ jobs:
       - name: package
         run: moon package
 
+      # 浏览器验收壳：同一份 wasm 在 Node 里实例化并跑 selftest。
+      - name: wasm selftest
+        run: |
+          moon build --target wasm-gc --release
+          node tools/wasm_check.mjs
+
       - name: demo
         run: moon run examples/demo
 

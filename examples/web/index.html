@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mooncsg · 浏览器验收</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #0f1115; color: #e6e6e6;
+    font: 15px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  main { width: min(680px, 92vw); padding: 40px 0; }
+  h1 { font-size: 20px; margin: 0 0 8px; letter-spacing: .02em; }
+  p.lead { color: #9aa0aa; margin: 0 0 24px; }
+  button {
+    appearance: none; border: 1px solid #2f6feb; background: #2f6feb;
+    color: #fff; padding: 10px 18px; border-radius: 8px; font: inherit;
+    cursor: pointer; transition: background .15s;
+  }
+  button:hover:not(:disabled) { background: #3b7bf5; }
+  button:disabled { opacity: .5; cursor: progress; }
+  #status { margin-left: 12px; font-weight: 700; }
+  #status.pass { color: #3fb950; }
+  #status.fail { color: #f85149; }
+  pre {
+    margin: 20px 0 0; padding: 16px; background: #161a22;
+    border: 1px solid #232a36; border-radius: 10px;
+    white-space: pre-wrap; word-break: break-word; min-height: 3em;
+  }
+  footer { margin-top: 24px; color: #6b7280; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>mooncsg · 浏览器验收</h1>
+  <p class="lead">同一份 wasm 模块，跑「网格化 → 水密 → 欧拉示性数 → 二进制 STL 往返」。</p>
+  <button id="run">run selftest</button><span id="status"></span>
+  <pre id="out">等待运行…</pre>
+  <footer>需要支持 wasm-gc 的浏览器（Chrome 119+ / Safari 18+ / Firefox 120+）。</footer>
+</main>
+<script type="module">
+const out = document.getElementById("out");
+const status = document.getElementById("status");
+const button = document.getElementById("run");
+
+async function run() {
+  button.disabled = true;
+  status.textContent = "";
+  status.className = "";
+  out.textContent = "加载 web.wasm…";
+  try {
+    const res = await fetch("./web.wasm", { cache: "no-store" });
+    if (!res.ok) throw new Error(`web.wasm 不可用（HTTP ${res.status}）`);
+    const { instance } = await WebAssembly.instantiate(await res.arrayBuffer(), {});
+    const ex = instance.exports;
+    const passed = ex.selftest();
+    let text = "";
+    const n = ex.report_len();
+    for (let i = 0; i < n; i++) {
+      text += String.fromCharCode(ex.report_code_unit(i));
+    }
+    out.textContent = text;
+    window.__mooncsg = { passed, text };
+    const ok = passed === 4;
+    status.textContent = ok ? "PASS" : "FAIL";
+    status.className = ok ? "pass" : "fail";
+  } catch (err) {
+    out.textContent = String(err);
+    status.textContent = "ERROR";
+    status.className = "fail";
+    window.__mooncsg = { passed: 0, text: String(err) };
+  } finally {
+    button.disabled = false;
+  }
+}
+
+button.addEventListener("click", run);
+
+// ?selftest=1 时自动跑一次，方便 CI / headless 直接判定，
+// 也方便人工在地址栏里敲一下就得到结论。
+if (new URL(location.href).searchParams.has("selftest")) {
+  run();
+}
+</script>
+</body>
+</html>
