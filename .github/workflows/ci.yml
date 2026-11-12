@@ -64,10 +64,13 @@ jobs:
         run: moon package
 
       # 浏览器验收壳：同一份 wasm 在 Node 里实例化并跑 selftest。
+      # 走 build_web.mjs 而不是直接 `moon build`：它知道产物的两种目录层级
+      # （单模块仓库 / workspace 成员），并把 wasm 复制到固定位置，下面的
+      # 检查就不用猜路径了。
       - name: wasm selftest
         run: |
-          moon build --target wasm-gc --release
-          node tools/wasm_check.mjs
+          node tools/build_web.mjs
+          node tools/wasm_check.mjs examples/web/web.wasm
 
       - name: demo
         run: moon run examples/demo

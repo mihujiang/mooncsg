@@ -38,7 +38,11 @@ const steps = [
   { name: "bench", cmd: moon, args: ["run", "examples/bench", "--release"], shell: true },
   // 浏览器验收壳：编译 wasm、复制到页面目录、在 Node 里实例化跑 selftest。
   { name: "build web", cmd: process.execPath, args: ["tools/build_web.mjs"] },
-  { name: "wasm selftest", cmd: process.execPath, args: ["tools/wasm_check.mjs"] },
+  {
+    name: "wasm selftest",
+    cmd: process.execPath,
+    args: ["tools/wasm_check.mjs", "examples/web/web.wasm"],
+  },
 ];
 
 // Python 基准是可选的：机器上没装 python 时跳过，不判失败。

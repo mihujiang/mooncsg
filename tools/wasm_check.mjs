@@ -7,14 +7,38 @@
 // wasm-gc 需要 V8 12+（Node 22 起内置）。
 
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 
+// 构建产物的目录层级取决于「模块根在哪」：
+// - 单独 clone 本仓库（CI 就是这样）是 `_build/wasm-gc/release/build/examples/web/`；
+// - 作为 moon workspace 的成员时，路径里会多出模块前缀 `weopqrst/mooncsg/`。
+// 硬编码某一种会让另一种环境找不到文件，所以列候选之外再兜一次递归搜索。
 const candidates = [
+  "_build/wasm-gc/release/build/examples/web/web.wasm",
   "_build/wasm-gc/release/build/weopqrst/mooncsg/examples/web/web.wasm",
   "../_build/wasm-gc/release/build/weopqrst/mooncsg/examples/web/web.wasm",
 ];
 
-const wasmPath = process.argv[2] ?? candidates.find((p) => existsSync(p));
+function findWasm(dir) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+  for (const e of entries) {
+    if (e.isFile() && e.name === "web.wasm") return `${dir}/${e.name}`;
+  }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const hit = findWasm(`${dir}/${e.name}`);
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
+}
+
+const wasmPath =
+  process.argv[2] ?? candidates.find((p) => existsSync(p)) ?? findWasm("_build");
 if (wasmPath === undefined) {
   console.error("找不到 web.wasm，先跑 moon build --target wasm-gc --release");
   process.exit(2);
