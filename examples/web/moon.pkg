@@ -4,8 +4,6 @@ import {
 
 options(
   link: {
-    "wasm-gc": {
-      "exports": ["selftest", "report_len", "report_code_unit"],
-    },
+    "wasm-gc": { "exports": [ "selftest", "report_len", "report_code_unit" ] },
   },
 )

@@ -9,13 +9,13 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 
 ## 现状
 
-已覆盖 M0–M5：
+已覆盖 M0–M6：
 
 - `vec.mbt`：`Vec3` / `Mat3` / `Aabb`
 - `sdf.mbt`：球、盒、半空间、圆柱、环面；平移/旋转/缩放；并/交/差/平滑并；
   保守包围盒
 - `marching.mbt`：规则体素 + 6 四面体分解 + 边键焊接 + 梯度投影
-- `mesh.mbt`：散度体积、面积、水密判定、欧拉示性数 / 亏格
+- `mesh.mbt`：散度体积、面积、水密判定、欧拉示性数 / 亏格、FNV-1a 指纹
 - `export.mbt`：OBJ、ASCII STL、二进制 STL，以及二进制 STL 回读
 - `examples/web`：wasm 验收壳（页面 + `?selftest=1` 自动跑）
 - `tools/oracle.py`：独立解析基准（只用标准库）
@@ -24,7 +24,7 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 ## 快速开始
 
 ```bash
-moon test                 # 29 个测试
+moon test                 # 31 个测试（native / js / wasm-gc 都要跑）
 moon run examples/demo    # 盒减球，打印体积/面积/拓扑
 moon check --deny-warn
 moon fmt --check
@@ -64,6 +64,8 @@ euler:      0 (genus 1)
 | 等值面正好落在格点上时仍水密、体积误差 < 1% | `mesh_test.mbt` |
 | 每条无向边恰好 2 个面（水密） | `mesh_test.mbt` |
 | 同输入两次网格化逐位相同 | `mesh_test.mbt` |
+| 网格指纹等于常量 7885752854646016839（native / js / wasm-gc 三后端一致） | `mesh_test.mbt` |
+| 分辨率或朝向变化时指纹必然改变（指纹确实覆盖几何与拓扑） | `mesh_test.mbt` |
 | OBJ/ASCII STL 行数与索引范围、字节级确定性 | `export_test.mbt` |
 | 二进制 STL 往返后三角数/顶点数/欧拉示性数不变、体积相对误差 < 1e-6 | `export_test.mbt` |
 | 截断的二进制 STL 返回 `None` 而不是越界 | `export_test.mbt` |

@@ -4,7 +4,7 @@
 /// 这些函数会被 `moon build --target wasm-gc` 导出成 wasm 函数，
 /// 由 `examples/web/index.html` 里的按钮调用。它们只做两件事：
 /// 跑一遍「网格化 + 导出 + 回读」，然后给出可读的结论。
-let selftest_report : Ref[String] = { val: "" }
+let selftest_report : Ref[String] = { val: "", }
 
 ///|
 fn check(name : String, ok : Bool) -> String {
@@ -17,7 +17,7 @@ fn check(name : String, ok : Bool) -> String {
 
 ///|
 /// 跑一遍验收检查，返回通过项数（用于 JS 侧判断是否全绿）。
-pub fn selftest() -> Int {
+pub fn selftest() -> Int32 {
   let lines : Array[String] = []
   let mut passed = 0
   let sphere = @mooncsg.Sdf::sphere(10.0)
@@ -63,13 +63,13 @@ pub fn selftest() -> Int {
 /// 不直接导出 `report() -> String`：wasm-gc 里 `String` 是 GC 对象，
 /// JS 侧拿到的是不透明引用，读不出字符。拆成「长度 + 逐码元」两个
 /// 纯整数接口之后，宿主只需要一个 for 循环。
-pub fn report_len() -> Int {
+pub fn report_len() -> Int32 {
   selftest_report.val.length()
 }
 
 ///|
 /// 报告文本的第 `i` 个 UTF-16 码元。
-pub fn report_code_unit(i : Int) -> Int {
+pub fn report_code_unit(i : Int32) -> Int32 {
   match selftest_report.val.get_char(i) {
     Some(c) => c.to_int()
     None => 0

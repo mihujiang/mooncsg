@@ -46,6 +46,11 @@ jobs:
             exit 1
           fi
 
+      # 三个后端都跑同一套测试：网格指纹是写死的常量，后端间出现任何
+      # 浮点差异或遍历顺序差异都会在这里炸。
+      - name: test native
+        run: moon test --target native
+
       - name: test wasm-gc
         run: moon test --target wasm-gc
 

@@ -3,10 +3,9 @@
 fn main {
   let half = @mooncsg.Vec3::new(20.0, 15.0, 10.0)
   let sdf = @mooncsg.Sdf::box(half).subtract(@mooncsg.Sdf::sphere(12.0))
-  let bounds = @mooncsg.Aabb::from_center_half(
-    @mooncsg.Vec3::zero(),
-    half,
-  ).expand(0.5)
+  let bounds = @mooncsg.Aabb::from_center_half(@mooncsg.Vec3::zero(), half).expand(
+    0.5,
+  )
   let m = @mooncsg.mesh(sdf, bounds, @mooncsg.MeshOptions::new(64))
   println("triangles:  \{m.triangle_count()}")
   println("vertices:   \{m.vertex_count()}")

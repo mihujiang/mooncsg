@@ -203,6 +203,31 @@ pub fn Mesh::genus(self : Mesh) -> Int32 {
 }
 
 ///|
+fn fnv1a(h : UInt64, v : UInt64) -> UInt64 {
+  (h ^ v) * 0x100000001b3UL
+}
+
+///|
+/// 网格内容的 64 位指纹：顶点坐标的位模式（按存储顺序）+ 索引序列。
+///
+/// 「同输入两次网格化逐位相同」只能证明同后端内确定；把指纹写成测试
+/// 常量之后，wasm-gc / js / native 任意后端算出的值都必须是同一个，
+/// 这才叫跨后端确定性。顶点与索引的顺序本身是确定性的产物，所以指纹
+/// 也顺带覆盖了遍历顺序。
+pub fn Mesh::hash(self : Mesh) -> UInt64 {
+  let mut h : UInt64 = 0xcbf29ce484222325UL
+  for p in self.positions {
+    h = fnv1a(h, p.x.reinterpret_as_uint64())
+    h = fnv1a(h, p.y.reinterpret_as_uint64())
+    h = fnv1a(h, p.z.reinterpret_as_uint64())
+  }
+  for i in self.indices {
+    h = fnv1a(h, i.to_uint64())
+  }
+  h
+}
+
+///|
 pub fn Mesh::bounds(self : Mesh) -> Aabb {
   if self.positions.length() == 0 {
     return Aabb::new(Vec3::zero(), Vec3::zero())

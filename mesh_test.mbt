@@ -213,3 +213,32 @@ test "meshing is deterministic for the same input" {
     i = i + 1
   }
 }
+
+///|
+test "mesh hash is stable across backends" {
+  let m = @mooncsg.mesh(
+    @mooncsg.Sdf::sphere(10.0),
+    @mooncsg.Aabb::from_center_half(
+      @mooncsg.Vec3::zero(),
+      @mooncsg.Vec3::splat(10.0),
+    ).expand(0.5),
+    @mooncsg.MeshOptions::new(32),
+  )
+  // 该常量在 native / js / wasm-gc 三个后端都必须一致；任一后端出现
+  // 不同的浮点结果或不同的遍历顺序，这个断言就会炸。
+  assert_eq(m.hash(), 7885752854646016839UL)
+}
+
+///|
+test "mesh hash distinguishes different inputs" {
+  let s = @mooncsg.Sdf::sphere(10.0)
+  let b = @mooncsg.Aabb::from_center_half(
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::splat(10.0),
+  ).expand(0.5)
+  let fine = @mooncsg.mesh(s, b, @mooncsg.MeshOptions::new(32))
+  let coarse = @mooncsg.mesh(s, b, @mooncsg.MeshOptions::new(16))
+  assert_true(fine.hash() != coarse.hash())
+  // 翻转朝向只改索引顺序，指纹必须随之变化，否则指纹覆盖不住拓扑。
+  assert_true(fine.hash() != fine.flipped().hash())
+}
