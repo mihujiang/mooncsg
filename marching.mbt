@@ -174,11 +174,31 @@ fn Builder::emit(
 }
 
 ///|
+/// 场数组的总格点上限：16.7M 个 `Double` ≈ 134 MB，是 wasm32 下还能接受的
+/// 最坏情况。单轴上限 512 挡不住「三个轴都大」。
+const MAX_GRID_SLOTS : Int32 = 16777216
+
+///|
+/// 某个轴上的格点数，至少 1。
+fn grid_count(extent : Double, h : Double) -> Int32 {
+  let n = ceil_int(extent / h)
+  if n < 1 {
+    1
+  } else {
+    n
+  }
+}
+
+///|
 /// 从 SDF 生成水密三角网格。
 ///
 /// 采样在包围盒内做规则体素网格，每个体素拆 6 个四面体，按四面体顶点的
 /// 符号取出 0/1/2 个三角形，交点在格点边上插值、按边键焊接。
 /// 输出朝向由散度体积统一校正：体积为负就整体翻转。
+///
+/// `resolution` 先夹到 `[2, 512]`，再按总格点 `MAX_GRID_SLOTS` 二次收紧：
+/// 512 的立方包围盒原本是 513³ ≈ 1.35 亿个格点（场数组就是 1 GB 级），
+/// 会被自动降到约 253³，代价是细分变粗，而不是 OOM。
 pub fn mesh(sdf : Sdf, bounds : Aabb, opts : MeshOptions) -> Mesh {
   let res = if opts.resolution < 2 {
     2
@@ -192,10 +212,17 @@ pub fn mesh(sdf : Sdf, bounds : Aabb, opts : MeshOptions) -> Mesh {
   if longest <= 0.0 {
     return Mesh::empty()
   }
-  let h = longest / res.to_double()
-  let nx = if ceil_int(size.x / h) < 1 { 1 } else { ceil_int(size.x / h) }
-  let ny = if ceil_int(size.y / h) < 1 { 1 } else { ceil_int(size.y / h) }
-  let nz = if ceil_int(size.z / h) < 1 { 1 } else { ceil_int(size.z / h) }
+  // 等比放大步长，1.25 倍一步，几步内收敛；`h` 单调增，不会死循环。
+  let mut h = longest / res.to_double()
+  let mut nx = grid_count(size.x, h)
+  let mut ny = grid_count(size.y, h)
+  let mut nz = grid_count(size.z, h)
+  while (nx + 1) * (ny + 1) * (nz + 1) > MAX_GRID_SLOTS {
+    h = h * 1.25
+    nx = grid_count(size.x, h)
+    ny = grid_count(size.y, h)
+    nz = grid_count(size.z, h)
+  }
   let nx1 = nx + 1
   let ny1 = ny + 1
   let nz1 = nz + 1

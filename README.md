@@ -23,6 +23,24 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 - `tools/wasm_check.mjs`：在 Node 里实例化同一份 wasm 跑验收
 - `tools/acceptance.mjs`：一条命令跑全部验收项并打表
 
+## 安装
+
+已发布到 mooncakes（`weopqrst/mooncsg@0.1.0`）：
+
+```bash
+moon add weopqrst/mooncsg
+```
+
+效果等同在 `moon.mod` 里写：
+
+```moonbit
+import {
+  "weopqrst/mooncsg@0.1.0",
+}
+```
+
+再在调用方包的 `moon.pkg` 里加 `"weopqrst/mooncsg"`，即可用 `@mooncsg.` 前缀调用。
+
 ## 快速开始
 
 ```bash
@@ -41,17 +59,23 @@ node tools/wasm_check.mjs # 不开浏览器，在 Node 里跑同一份 wasm
 node tools/acceptance.mjs
 ```
 
-`examples/demo` 的输出：
+`examples/demo` 的输出（盒减球，48 分辨率）：
 
 ```
 triangles:  126484
 vertices:   63242
+
 volume:     17058.878927955866
+area:       6336.3007417442195
 watertight: true
 euler:      0 (genus 1)
+obj bytes:  4577832
+stl bytes:  26192644
+
+预期体积（解析）：24000 - 2*pi*10*(144 - 100/3) = 17046.6
 ```
 
-解析体积 `24000 - 2π·10·(144 - 100/3) = 17046.6`，相对误差 0.07%。
+体积相对误差 0.07%。
 
 ## 性能基线
 
@@ -107,9 +131,9 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 
 ## 设计要点
 
-**`f == 0` 一律算外部。** 边界点归外部，配上一个相对体素尺度的插值偏置
-（`t ∈ [1e-6, 1-1e-6]`），避免零面积三角形；否则同一格点会在相邻体素里
-被两边都算一次，网格出现重面。
+**`f == 0` 一律算外部。** 边界点归外部，插值参数再夹到 `t ∈ [1e-6, 1-1e-6]`
+（按边长比例，与体素尺寸无关），避免零面积三角形；否则同一格点会在相邻
+体素里被两边都算一次，网格出现重面。
 
 **焊接不靠 eps 量化。** 交点的键是「两个格点索引的 min/max」：同一条
 几何边无论从哪个四面体、哪个方向被访问都得到同一个键，位置也统一按
@@ -135,6 +159,9 @@ wasm-gc 三个后端必须算出同一个数。
 - 二进制 STL 的坐标是 `f32`，这是格式限制；要更高精度请用 OBJ。
 - 回读只做了二进制 STL（OBJ 回读需要文本数字解析，暂缓）。
 - 没有 BVH / 距离查询加速，`eval` 直接遍历树；雏版靠分辨率控制成本。
+- `resolution` 上限 512，且总格点另有 `MAX_GRID_SLOTS`（16.7M）收紧：
+  512 的立方包围盒实际按约 253³ 采样（场数组约 134 MB），再大就该分块
+  或换稀疏/自适应表示，而不是继续加分辨率。
 
 ## 许可
 
