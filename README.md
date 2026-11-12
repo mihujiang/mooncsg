@@ -9,20 +9,20 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 
 ## 现状
 
-第一个雏版覆盖 M0–M2：
+已覆盖 M0–M4：
 
 - `vec.mbt`：`Vec3` / `Mat3` / `Aabb`
 - `sdf.mbt`：球、盒、半空间、圆柱、环面；平移/旋转/缩放；并/交/差/平滑并；
   保守包围盒
-- `marching.mbt`：规则体素 + 6 四面体分解 + 边键焊接 + Newton 投影
+- `marching.mbt`：规则体素 + 6 四面体分解 + 边键焊接 + 梯度投影
 - `mesh.mbt`：散度体积、面积、水密判定、欧拉示性数 / 亏格
-- `export.mbt`：OBJ、ASCII STL
+- `export.mbt`：OBJ、ASCII STL、二进制 STL，以及二进制 STL 回读
 - `tools/oracle.py`：独立解析基准（只用标准库）
 
 ## 快速开始
 
 ```bash
-moon test                 # 19 个测试
+moon test                 # 29 个测试
 moon run examples/demo    # 盒减球，打印体积/面积/拓扑
 moon check --deny-warn
 moon fmt --check
@@ -53,9 +53,13 @@ euler:      0 (genus 1)
 | 盒挖两个贯通孔后亏格 = 2、欧拉示性数 = -2、体积误差 < 0.5% | `mesh_test.mbt` |
 | 盒减球体积与球带公式误差 < 1% | `mesh_test.mbt` |
 | 完全被挖空时输出空网格 | `mesh_test.mbt` |
+| 相切球、零厚度板、空交集、贴面格点、退化包围盒、超低分辨率都不崩 | `mesh_test.mbt` |
+| 等值面正好落在格点上时仍水密、体积误差 < 1% | `mesh_test.mbt` |
 | 每条无向边恰好 2 个面（水密） | `mesh_test.mbt` |
 | 同输入两次网格化逐位相同 | `mesh_test.mbt` |
-| OBJ/STL 行数与索引范围、字节级确定性 | `export_test.mbt` |
+| OBJ/ASCII STL 行数与索引范围、字节级确定性 | `export_test.mbt` |
+| 二进制 STL 往返后三角数/顶点数/欧拉示性数不变、体积相对误差 < 1e-6 | `export_test.mbt` |
+| 截断的二进制 STL 返回 `None` 而不是越界 | `export_test.mbt` |
 
 `tools/oracle.py` 用 Python 标准库手算同样的解析值，CI 里单独跑一遍，
 避免「期望值是从被测实现抄来的」。
@@ -85,7 +89,8 @@ euler:      0 (genus 1)
 - 体积与面积是结果度量，不是约束求解；没有做保体积简化（decimation）。
 - 半空间没有有限包围盒，单独网格化需要调用方给范围。
 - 只有均匀缩放；非均匀缩放会让 SDF 不再是距离场（需要除以梯度模）。
-- STL 只有 ASCII；二进制 STL 留到进切片软件的集成阶段。
+- 二进制 STL 的坐标是 `f32`，这是格式限制；要更高精度请用 OBJ。
+- 回读只做了二进制 STL（OBJ 回读需要文本数字解析，暂缓）。
 - 没有 BVH / 距离查询加速，`eval` 直接遍历树；雏版靠分辨率控制成本。
 
 ## 许可
