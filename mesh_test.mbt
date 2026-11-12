@@ -113,6 +113,88 @@ test "fully subtracted solid produces empty mesh" {
 }
 
 ///|
+test "tangent spheres stay finite" {
+  // 两个球在一点相切：接触点处网格是共享顶点，拓扑上非流形，
+  // 但体积必须仍然对得上，且不能出现 NaN 或 panic。
+  let s = @mooncsg.Sdf::sphere(10.0).union(
+    @mooncsg.Sdf::sphere(10.0).at(@mooncsg.Vec3::new(20.0, 0.0, 0.0)),
+  )
+  let b = @mooncsg.Aabb::new(
+    @mooncsg.Vec3::new(-11.0, -11.0, -11.0),
+    @mooncsg.Vec3::new(31.0, 11.0, 11.0),
+  )
+  let m = @mooncsg.mesh(s, b, @mooncsg.MeshOptions::new(40))
+  assert_true(!m.is_empty())
+  let want = 2.0 * 4.0 / 3.0 * 3.141592653589793 * 1000.0
+  assert_true(rel_err(m.volume(), want) < 0.01)
+}
+
+///|
+test "zero thickness slab produces no runaway volume" {
+  // 厚度 0.01 的板，体素 1.0：要么完全没有符号变化（空网格），
+  // 要么只有一层薄壳。无论哪种，都不能出现「把整个包围盒当成实体」。
+  let thin = @mooncsg.Sdf::plane(@mooncsg.Vec3::new(0.0, 0.0, 1.0), 0.005).intersect(
+    @mooncsg.Sdf::plane(@mooncsg.Vec3::new(0.0, 0.0, -1.0), 0.005),
+  )
+  let b = @mooncsg.Aabb::new(
+    @mooncsg.Vec3::splat(-10.0),
+    @mooncsg.Vec3::splat(10.0),
+  )
+  let m = @mooncsg.mesh(thin, b, @mooncsg.MeshOptions::new(20))
+  assert_true(m.volume() < 1000.0)
+}
+
+///|
+test "empty intersection produces empty mesh" {
+  let a = @mooncsg.Sdf::sphere(5.0)
+  let c = @mooncsg.Sdf::sphere(5.0).at(@mooncsg.Vec3::new(20.0, 0.0, 0.0))
+  let b = @mooncsg.Aabb::new(
+    @mooncsg.Vec3::splat(-6.0),
+    @mooncsg.Vec3::splat(6.0),
+  )
+  let m = @mooncsg.mesh(a.intersect(c), b, @mooncsg.MeshOptions::new(12))
+  assert_true(m.is_empty())
+  assert_eq(m.volume(), 0.0)
+}
+
+///|
+test "surface exactly on grid points stays watertight" {
+  // 盒半长 10，包围盒正好 [-10, 10]，resolution 20 时格距 1：
+  // 六个面全部落在格点上（f == 0，按约定归外部）。
+  let s = @mooncsg.Sdf::box(@mooncsg.Vec3::splat(10.0))
+  let b = @mooncsg.Aabb::new(
+    @mooncsg.Vec3::splat(-10.0),
+    @mooncsg.Vec3::splat(10.0),
+  )
+  let m = @mooncsg.mesh(s, b, @mooncsg.MeshOptions::new(20))
+  assert_true(m.is_watertight())
+  assert_true(rel_err(m.volume(), 8000.0) < 0.01)
+  assert_eq(m.euler(), 2)
+}
+
+///|
+test "degenerate bounds yield an empty mesh" {
+  let p = @mooncsg.Vec3::new(1.0, 2.0, 3.0)
+  let m = @mooncsg.mesh(
+    @mooncsg.Sdf::sphere(10.0),
+    @mooncsg.Aabb::new(p, p),
+    @mooncsg.MeshOptions::new(8),
+  )
+  assert_true(m.is_empty())
+}
+
+///|
+test "resolution below two is clamped" {
+  let m = @mooncsg.mesh(
+    @mooncsg.Sdf::sphere(10.0),
+    sphere_bounds(10.0),
+    @mooncsg.MeshOptions::new(1),
+  )
+  assert_true(!m.is_empty())
+  assert_true(m.volume() > 0.0)
+}
+
+///|
 test "meshing is deterministic for the same input" {
   let s = @mooncsg.Sdf::sphere(10.0).subtract(
     @mooncsg.Sdf::box(@mooncsg.Vec3::new(20.0, 20.0, 20.0)),
