@@ -18,14 +18,17 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 - `mesh.mbt`：散度体积、面积、水密判定、欧拉示性数 / 亏格、FNV-1a 指纹
 - `export.mbt`：OBJ、ASCII STL、二进制 STL，以及二进制 STL 回读
 - `examples/web`：wasm 验收壳（页面 + `?selftest=1` 自动跑）
+- `examples/bench`：网格化耗时基线（native / js / wasm-gc 同一份代码）
 - `tools/oracle.py`：独立解析基准（只用标准库）
 - `tools/wasm_check.mjs`：在 Node 里实例化同一份 wasm 跑验收
+- `tools/acceptance.mjs`：一条命令跑全部验收项并打表
 
 ## 快速开始
 
 ```bash
 moon test                 # 31 个测试（native / js / wasm-gc 都要跑）
 moon run examples/demo    # 盒减球，打印体积/面积/拓扑
+moon run examples/bench --release   # 网格化耗时基线
 moon check --deny-warn
 moon fmt --check
 
@@ -33,6 +36,9 @@ moon fmt --check
 node tools/build_web.mjs  # 编译 wasm 并复制到 examples/web/
 node tools/serve.mjs      # 打开 http://localhost:8000/?selftest=1
 node tools/wasm_check.mjs # 不开浏览器，在 Node 里跑同一份 wasm
+
+# 一次跑完全部验收项（check/fmt/三后端测试/package/demo/web/oracle）
+node tools/acceptance.mjs
 ```
 
 `examples/demo` 的输出：
@@ -46,6 +52,30 @@ euler:      0 (genus 1)
 ```
 
 解析体积 `24000 - 2π·10·(144 - 100/3) = 17046.6`，相对误差 0.07%。
+
+## 性能基线
+
+`moon run examples/bench --release` 走 `moonbitlang/core/bench` 的单调时钟
+（native 绑 `clock_gettime`，wasm 绑 `time_unstable.instant_now`，微秒），
+先跑一次预热，再取三次的最小值。机器：Intel Core Ultra 9 275HX / Windows 11 /
+Node 24（wasm-gc 与 js 都跑在 V8 上）。
+
+| 用例 | 三角形 | wasm-gc | js |
+| --- | --- | --- | --- |
+| 球 r=10，32³ | 26280 | 13.1 ms | 37.6 ms |
+| 球 r=10，64³ | 104688 | 64.1 ms | 165.1 ms |
+| 立方体 40³ 挖球 r=24，48³ | 107280 | 87.5 ms | 220.1 ms |
+| 环面 R=8 r=3，48³ | 36172 | 20.3 ms | 40.5 ms |
+
+两点说明：
+
+- **wasm-gc 比 js 后端快 1.9–2.9 倍**，这是同一份 MoonBit 源码换后端的结果，
+  不是两份实现——wasm-gc 直接吃 `f64` 运算，js 后端还要过一层 BigInt/boxing 的
+  边界检查。
+- **native 数字本地没有**：这台 Windows 机器没装 MSVC Build Tools，native 后端
+  整体不可用（`tools/acceptance.mjs` 会把它判成 SKIP 而不是 FAIL）。CI 的
+  ubuntu runner 上 `moon test --target native` 会跑，所以 native 的正确性有
+  持续覆盖，只是没有本地耗时对照。本表不编 native 的数。
 
 ## 验收口径
 
@@ -64,12 +94,13 @@ euler:      0 (genus 1)
 | 等值面正好落在格点上时仍水密、体积误差 < 1% | `mesh_test.mbt` |
 | 每条无向边恰好 2 个面（水密） | `mesh_test.mbt` |
 | 同输入两次网格化逐位相同 | `mesh_test.mbt` |
-| 网格指纹等于常量 7885752854646016839（native / js / wasm-gc 三后端一致） | `mesh_test.mbt` |
+| 网格指纹等于常量 7885752854646016839（js / wasm-gc 本地已验证，native 由 CI 跑） | `mesh_test.mbt` |
 | 分辨率或朝向变化时指纹必然改变（指纹确实覆盖几何与拓扑） | `mesh_test.mbt` |
 | OBJ/ASCII STL 行数与索引范围、字节级确定性 | `export_test.mbt` |
 | 二进制 STL 往返后三角数/顶点数/欧拉示性数不变、体积相对误差 < 1e-6 | `export_test.mbt` |
 | 截断的二进制 STL 返回 `None` 而不是越界 | `export_test.mbt` |
 | wasm 验收壳 4/4 通过（Node 与浏览器同一份 wasm） | `tools/wasm_check.mjs` |
+| 全部验收项一条命令跑完（check/fmt/三后端测试/package/demo/web/oracle） | `tools/acceptance.mjs` |
 
 `tools/oracle.py` 用 Python 标准库手算同样的解析值，CI 里单独跑一遍，
 避免「期望值是从被测实现抄来的」。

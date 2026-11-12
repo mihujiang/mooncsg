@@ -72,6 +72,10 @@ jobs:
       - name: demo
         run: moon run examples/demo
 
+      # 耗时基线：CI 里不求数字好看，只求这条命令能跑通（回归了会被发现）。
+      - name: bench
+        run: moon run examples/bench --release
+
       # 验收数字必须能在 CI 里复算：Python 只算解析式，不 import 几何库。
       - name: analytic oracle
         run: python3 tools/oracle.py
