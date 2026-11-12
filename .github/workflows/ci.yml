@@ -1,0 +1,66 @@
+name: CI
+
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: moon version
+        run: |
+          v=$(moon version --all 2>&1 | tr '\n' ' ')
+          printf '%s\n' "$v"
+          echo "::notice::moon: $v"
+
+      - name: check
+        run: |
+          if ! out=$(moon check --deny-warn 2>&1); then
+            printf '%s\n' "$out"
+            msg=$(printf '%s' "$out" | tr -d '%' | tr '\n' '|' | head -c 3000)
+            echo "::error::moon check failed: $msg"
+            exit 1
+          fi
+
+      - name: fmt
+        run: |
+          if ! out=$(moon fmt --check 2>&1); then
+            printf '%s\n' "$out"
+            msg=$(printf '%s' "$out" | tr -d '%' | tr '\n' '|' | head -c 3000)
+            echo "::error::moon fmt failed: $msg"
+            exit 1
+          fi
+
+      - name: test wasm-gc
+        run: moon test --target wasm-gc
+
+      - name: test js
+        run: moon test --target js
+
+      - name: build native
+        run: moon build --target native
+
+      - name: package
+        run: moon package
+
+      - name: demo
+        run: moon run examples/demo
+
+      # 验收数字必须能在 CI 里复算：Python 只算解析式，不 import 几何库。
+      - name: analytic oracle
+        run: python3 tools/oracle.py
