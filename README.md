@@ -94,7 +94,7 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | 等值面正好落在格点上时仍水密、体积误差 < 1% | `mesh_test.mbt` |
 | 每条无向边恰好 2 个面（水密） | `mesh_test.mbt` |
 | 同输入两次网格化逐位相同 | `mesh_test.mbt` |
-| 网格指纹等于常量 7885752854646016839（js / wasm-gc 本地已验证，native 由 CI 跑） | `mesh_test.mbt` |
+| 网格指纹等于常量 7885752854646016839（js / wasm-gc 本地跑，native 在 CI 跑，三后端同值） | `mesh_test.mbt` |
 | 分辨率或朝向变化时指纹必然改变（指纹确实覆盖几何与拓扑） | `mesh_test.mbt` |
 | OBJ/ASCII STL 行数与索引范围、字节级确定性 | `export_test.mbt` |
 | 二进制 STL 往返后三角数/顶点数/欧拉示性数不变、体积相对误差 < 1e-6 | `export_test.mbt` |
@@ -123,7 +123,9 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 换一种拆分，同一 SDF 同一分辨率会得到不同三角数，体积就不可比。
 
 **网格化是确定性的。** 固定遍历顺序、固定四面体表、固定排序（自写归并），
-不使用哈希迭代顺序决定输出顺序。
+不使用哈希迭代顺序决定输出顺序。这份确定性是可验证的：`Mesh::hash()` 把
+顶点位模式与索引序列压成 FNV-1a 64 位指纹，测试用常量断言，native / js /
+wasm-gc 三个后端必须算出同一个数。
 
 ## 已知限制
 
@@ -137,3 +139,7 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 ## 许可
 
 Apache-2.0。
+
+更细的取舍说明（每个文件「为什么长这样」、验收策略、AI 参与与验证流程）见
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，版本变更见
+[`CHANGELOG.md`](CHANGELOG.md)。
