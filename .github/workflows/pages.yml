@@ -56,7 +56,11 @@ jobs:
           cp examples/web/index.html examples/web/web.wasm _site/
           ls -l _site
 
+      # `enablement: true` 允许在仓库还没开 Pages 时由 workflow 自己打开
+      # （Pages source = GitHub Actions），否则首次部署会因为「未启用」失败。
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
