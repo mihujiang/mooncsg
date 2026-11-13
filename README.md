@@ -9,6 +9,10 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 
 在线演示：<https://mihujiang.github.io/mooncsg/>　　实测数字：见 [`ACCEPTANCE.md`](ACCEPTANCE.md)
 
+> 演示站点由 `.github/workflows/pages.yml` 部署。该 workflow 要求仓库先在
+> **Settings → Pages → Source** 里选一次 “GitHub Actions”（`GITHUB_TOKEN`
+> 没有 admin 权限，`enablement: true` 会 403），之后每次 push 自动重建。
+
 ## 现状
 
 已覆盖 M0–M6：
