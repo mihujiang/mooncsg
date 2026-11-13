@@ -1,6 +1,7 @@
 import {
   "weopqrst/mooncsg",
   "moonbitlang/core/bench" @clock,
+  "moonbitlang/core/env",
 }
 
 pkgtype(kind: "executable")

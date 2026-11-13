@@ -1,0 +1,73 @@
+name: Pages
+
+# 把 examples/web 发布成静态站点：同一份 wasm 在浏览器里跑给所有人看。
+# 只有 `?selftest=1` 只是本地验收手段，站点本身不带任何后端。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "examples/web/**"
+      - "*.mbt"
+      - "tools/build_web.mjs"
+      - "tools/serve.mjs"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只允许一次部署；新的 push 顶掉排队中的旧构建。
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      # 构建 wasm 并复制到 examples/web/web.wasm（该文件不进仓库，见 .gitignore）。
+      - name: build wasm
+        run: node tools/build_web.mjs
+
+      # 部署前先证明这份 wasm 是对的：Node 里跑 selftest 与交互接口，
+      # 免得把坏产物推上线。
+      - name: verify wasm
+        run: |
+          node tools/wasm_check.mjs examples/web/web.wasm
+          node tools/scene_check.mjs examples/web/web.wasm
+
+      - name: assemble site
+        run: |
+          mkdir -p _site
+          cp examples/web/index.html examples/web/web.wasm _site/
+          ls -l _site
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

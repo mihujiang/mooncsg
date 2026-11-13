@@ -58,6 +58,43 @@ test "torus has genus one" {
 }
 
 ///|
+test "cone frustum volume matches analytic" {
+  let r1 = 5.0
+  let r2 = 10.0
+  let h = 10.0
+  let s = @mooncsg.Sdf::cone(r1, r2, h)
+  let b = @mooncsg.Aabb::from_center_half(
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::new(r2, r2, h),
+  ).expand(0.5)
+  let m = @mooncsg.mesh(s, b, @mooncsg.MeshOptions::new(64))
+  assert_true(m.is_watertight())
+  // 体积公式里的 h 是总高，构造器收的是半高
+  let want = 3.141592653589793 * (2.0 * h) * (r1 * r1 + r1 * r2 + r2 * r2) / 3.0
+  assert_true(rel_err(m.volume(), want) < 0.01)
+  assert_eq(m.genus(), 0)
+  assert_eq(m.euler(), 2)
+}
+
+///|
+test "capsule volume matches analytic" {
+  let r = 5.0
+  let h = 5.0
+  let s = @mooncsg.Sdf::capsule(r, h)
+  let b = @mooncsg.Aabb::from_center_half(
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::new(r, r, h + r),
+  ).expand(0.5)
+  let m = @mooncsg.mesh(s, b, @mooncsg.MeshOptions::new(64))
+  assert_true(m.is_watertight())
+  let pi = 3.141592653589793
+  let want = pi * r * r * 2.0 * h + 4.0 / 3.0 * pi * r * r * r
+  assert_true(rel_err(m.volume(), want) < 0.01)
+  assert_eq(m.genus(), 0)
+  assert_eq(m.euler(), 2)
+}
+
+///|
 test "box minus sphere matches analytic volume" {
   let box = @mooncsg.Sdf::box(@mooncsg.Vec3::new(20.0, 15.0, 10.0))
   let ball = @mooncsg.Sdf::sphere(12.0)

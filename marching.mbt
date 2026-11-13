@@ -190,30 +190,23 @@ fn grid_count(extent : Double, h : Double) -> Int32 {
 }
 
 ///|
-/// 从 SDF 生成水密三角网格。
+/// 格点规划：`resolution` 先夹到 `[2, 512]`，再按总格点 `MAX_GRID_SLOTS`
+/// 二次收紧（1.25 倍一步放大步长，`h` 单调增，不会死循环）。
 ///
-/// 采样在包围盒内做规则体素网格，每个体素拆 6 个四面体，按四面体顶点的
-/// 符号取出 0/1/2 个三角形，交点在格点边上插值、按边键焊接。
-/// 输出朝向由散度体积统一校正：体积为负就整体翻转。
-///
-/// `resolution` 先夹到 `[2, 512]`，再按总格点 `MAX_GRID_SLOTS` 二次收紧：
 /// 512 的立方包围盒原本是 513³ ≈ 1.35 亿个格点（场数组就是 1 GB 级），
 /// 会被自动降到约 253³，代价是细分变粗，而不是 OOM。
-pub fn mesh(sdf : Sdf, bounds : Aabb, opts : MeshOptions) -> Mesh {
-  let res = if opts.resolution < 2 {
+///
+/// 返回 `(h, nx, ny, nz)`；`mesh` 与 `grid_shape` 共用这一份，免得
+/// 「请求 256、实际只有 205」这种差异只活在注释里。
+fn plan_grid(size : Vec3, resolution : Int32) -> (Double, Int32, Int32, Int32) {
+  let res = if resolution < 2 {
     2
-  } else if opts.resolution > 512 {
+  } else if resolution > 512 {
     512
   } else {
-    opts.resolution
+    resolution
   }
-  let size = bounds.size()
-  let longest = max_component(size)
-  if longest <= 0.0 {
-    return Mesh::empty()
-  }
-  // 等比放大步长，1.25 倍一步，几步内收敛；`h` 单调增，不会死循环。
-  let mut h = longest / res.to_double()
+  let mut h = max_component(size) / res.to_double()
   let mut nx = grid_count(size.x, h)
   let mut ny = grid_count(size.y, h)
   let mut nz = grid_count(size.z, h)
@@ -223,6 +216,37 @@ pub fn mesh(sdf : Sdf, bounds : Aabb, opts : MeshOptions) -> Mesh {
     ny = grid_count(size.y, h)
     nz = grid_count(size.z, h)
   }
+  (h, nx, ny, nz)
+}
+
+///|
+/// 请求 `resolution` 后**实际**会用的格点数 `(nx, ny, nz)`。
+///
+/// 只跟包围盒尺寸和 `resolution` 有关。想报告「真实的采样密度」时用它，
+/// 而不是回显请求值——超过 `MAX_GRID_SLOTS` 时两者不一样。
+pub fn grid_shape(bounds : Aabb, resolution : Int32) -> (Int32, Int32, Int32) {
+  let size = bounds.size()
+  if max_component(size) <= 0.0 {
+    return (0, 0, 0)
+  }
+  let (_, nx, ny, nz) = plan_grid(size, resolution)
+  (nx, ny, nz)
+}
+
+///|
+/// 从 SDF 生成水密三角网格。
+///
+/// 采样在包围盒内做规则体素网格，每个体素拆 6 个四面体，按四面体顶点的
+/// 符号取出 0/1/2 个三角形，交点在格点边上插值、按边键焊接。
+/// 输出朝向由散度体积统一校正：体积为负就整体翻转。
+///
+/// `resolution` 的口径见 `plan_grid`：先夹到 `[2, 512]`，再按总格点收紧。
+pub fn mesh(sdf : Sdf, bounds : Aabb, opts : MeshOptions) -> Mesh {
+  let size = bounds.size()
+  if max_component(size) <= 0.0 {
+    return Mesh::empty()
+  }
+  let (h, nx, ny, nz) = plan_grid(size, opts.resolution)
   let nx1 = nx + 1
   let ny1 = ny + 1
   let nz1 = nz + 1

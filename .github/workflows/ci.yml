@@ -72,6 +72,11 @@ jobs:
           node tools/build_web.mjs
           node tools/wasm_check.mjs examples/web/web.wasm
 
+      # 交互 demo 的 wasm 接口：建网格、读坐标、读指标。浏览器里 canvas
+      # 干的就是这些事，这里过了说明页面不会因为接口断掉而白屏。
+      - name: wasm scene
+        run: node tools/scene_check.mjs examples/web/web.wasm
+
       - name: demo
         run: moon run examples/demo
 

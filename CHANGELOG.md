@@ -2,6 +2,43 @@
 
 按里程碑记录，每条都挂 commit。版本号按 mooncakes 的 0.x 规则走。
 
+## 0.1.3 — 2026-11-13
+
+### Added
+
+- **原语补全**：`Sdf::cone(r1, r2, half_height)` 圆台与 `Sdf::capsule(radius,
+  half_height)` 胶囊，都是精确距离式（圆台 = 帽 + 侧棱投影，胶囊 = 轴向折返），
+  各自实现 `bounds()`。两向都测了「退化还是解析形状」（cone r1=r2 退化为圆柱、
+  capsule half_height=0 退化为球）与解析距离、梯度模长；体积对拍误差
+  0.27 % / 0.13 %（`res = 48`）。
+- **`grid_shape(bounds, resolution)`**：报告 `MAX_GRID_SLOTS` 收紧后**实际**会用的
+  格点数。请求 256 的立方包围盒实际是 205³，以前这个差异只写在注释里。
+  `mesh` 与它共用同一份 `plan_grid`，不会各算各的。
+- **`cmd/main` 命令行**：`moon run cmd/main -- sphere 10 --res 32`，支持
+  形状（sphere/box/cyl/cone/capsule/torus）、`--op diff|union|inter|smooth`、
+  `--k`、`--at x,y,z`、`--res`、`--format stl|obj`、`--name`、`--stats`。
+  输出走标准输出（当前工具链没有文件系统绑定），落盘靠重定向。
+- **交互 demo**：`examples/web` 从「一个按钮 + 一段文本」改成调参面板 +
+  canvas 2D 软件投影（画家算法 / 背面剔除 / lambert + 边缘光），实时显示
+  三角数、顶点数、体积、面积、水密、χ、亏格与实际格点数；支持
+  `?shape=&r1=&r2=&cut=&res=` 预设与拖拽 / 滚轮 / 双击复位。页面控制台打一行
+  可判定结论 `mooncsg ok tris=… vol=… watertight=1`。
+- **Pages 部署**：`.github/workflows/pages.yml`，构建 wasm → 跑 `wasm_check` +
+  `scene_check` → 发布静态站点。
+- **`tools/scene_check.mjs`**：在 Node 里覆盖 demo 的 7 个场景（球 / 盒 / 圆台 /
+  退化圆台 / 胶囊 / 环面 / 挖球），建网格、读逐顶点坐标、验指标。
+- **`tools/publish.mjs`**：发布后删本地缓存 zip，在临时模块里 `moon add` +
+  `moon check` 做真实回拉，并校验解包内容与版本号——专门针对「列表在、下载 404」
+  的平台故障。
+- **`ACCEPTANCE.md`**：把 0.1.3 的实测数字（12 项门禁、6 组体积对拍、拓扑、
+  性能、未覆盖项）记在一处。
+- 测试 35 → 41（4 个圆台 / 胶囊断言 + 2 个 `grid_shape` 断言）。
+
+### Changed
+
+- 性能基线补上 128³ 与 256（实为 205³）两档，bench 输出增加 `grid=` 列，
+  大分辨率那两档要 `-- big` 才跑。
+
 ## 0.1.2 — 2026-11-13
 
 ### Changed

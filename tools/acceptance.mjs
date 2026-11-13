@@ -43,6 +43,12 @@ const steps = [
     cmd: process.execPath,
     args: ["tools/wasm_check.mjs", "examples/web/web.wasm"],
   },
+  // 交互 demo 用到的场景接口：建网格、逐顶点坐标、体积/面积/拓扑。
+  {
+    name: "wasm scene",
+    cmd: process.execPath,
+    args: ["tools/scene_check.mjs", "examples/web/web.wasm"],
+  },
 ];
 
 // Python 基准是可选的：机器上没装 python 时跳过，不判失败。

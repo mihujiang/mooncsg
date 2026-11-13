@@ -1,0 +1,6 @@
+import {
+  "weopqrst/mooncsg",
+  "moonbitlang/core/env",
+}
+
+pkgtype(kind: "executable")

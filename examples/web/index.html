@@ -3,86 +3,567 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mooncsg · 浏览器验收</title>
+<title>mooncsg · 交互 demo</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    --bg: #0f1115;
+    --panel: #161a22;
+    --line: #232a36;
+    --text: #e6e6e6;
+    --dim: #9aa0aa;
+    --accent: #2f6feb;
+  }
+  * { box-sizing: border-box; }
   body {
-    margin: 0; min-height: 100vh; display: grid; place-items: center;
-    background: #0f1115; color: #e6e6e6;
-    font: 15px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+    font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
-  main { width: min(680px, 92vw); padding: 40px 0; }
-  h1 { font-size: 20px; margin: 0 0 8px; letter-spacing: .02em; }
-  p.lead { color: #9aa0aa; margin: 0 0 24px; }
+  header {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    padding: 18px 22px 12px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: .02em; }
+  header p { margin: 0; color: var(--dim); font-size: 13px; }
+  main {
+    display: grid; grid-template-columns: 300px minmax(0, 1fr);
+    gap: 0; align-items: stretch; min-height: calc(100vh - 59px);
+  }
+  @media (max-width: 820px) {
+    main { grid-template-columns: 1fr; }
+    #stage { order: -1; min-height: 46vh; }
+  }
+  aside {
+    padding: 18px 22px 28px; border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field > label { color: var(--dim); font-size: 12px; letter-spacing: .04em; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  select, input[type="range"] {
+    width: 100%; font: inherit; color: var(--text);
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 9px;
+  }
+  input[type="range"] { padding: 0; height: 26px; accent-color: var(--accent); }
+  input[type="range"]:disabled { opacity: .35; }
+  .val { color: var(--text); font-variant-numeric: tabular-nums; min-width: 3.4em; text-align: right; }
+  .hint { color: #6b7280; font-size: 12px; line-height: 1.5; }
   button {
-    appearance: none; border: 1px solid #2f6feb; background: #2f6feb;
-    color: #fff; padding: 10px 18px; border-radius: 8px; font: inherit;
-    cursor: pointer; transition: background .15s;
+    appearance: none; border: 1px solid var(--accent); background: var(--accent);
+    color: #fff; padding: 9px 14px; border-radius: 8px; font: inherit; cursor: pointer;
   }
-  button:hover:not(:disabled) { background: #3b7bf5; }
+  button.ghost { background: transparent; border-color: var(--line); color: var(--dim); }
+  button:hover:not(:disabled) { filter: brightness(1.12); }
   button:disabled { opacity: .5; cursor: progress; }
-  #status { margin-left: 12px; font-weight: 700; }
-  #status.pass { color: #3fb950; }
-  #status.fail { color: #f85149; }
-  pre {
-    margin: 20px 0 0; padding: 16px; background: #161a22;
-    border: 1px solid #232a36; border-radius: 10px;
-    white-space: pre-wrap; word-break: break-word; min-height: 3em;
+  #stage { position: relative; min-height: 420px; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+  #metrics {
+    position: absolute; left: 14px; top: 12px; padding: 8px 10px;
+    background: rgba(15,17,21,.72); border: 1px solid var(--line);
+    border-radius: 8px; font-size: 12px; line-height: 1.65;
+    font-variant-numeric: tabular-nums; pointer-events: none;
+    max-width: calc(100% - 28px);
   }
-  footer { margin-top: 24px; color: #6b7280; font-size: 13px; }
+  #metrics b { color: #7ee787; font-weight: 600; }
+  #metrics .bad { color: #f85149; }
+  #metrics .warn { color: #d29922; }
+  #hud {
+    position: absolute; right: 14px; top: 12px; color: var(--dim);
+    font-size: 12px; text-align: right; pointer-events: none;
+  }
+  #err {
+    position: absolute; left: 14px; bottom: 14px; right: 14px;
+    color: #f85149; font-size: 12px; white-space: pre-wrap;
+  }
+  #selftest {
+    margin-top: 4px; padding: 10px 12px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px;
+    white-space: pre-wrap; font-size: 12px; color: var(--dim); min-height: 2em;
+  }
+  #selftest.pass { color: #7ee787; }
+  #selftest.fail { color: #f85149; }
+  #line {
+    font-size: 11px; color: #6b7280; word-break: break-all;
+    font-variant-numeric: tabular-nums;
+  }
 </style>
 </head>
 <body>
-<main>
-  <h1>mooncsg · 浏览器验收</h1>
-  <p class="lead">同一份 wasm 模块，跑「网格化 → 水密 → 欧拉示性数 → 二进制 STL 往返」。</p>
-  <button id="run">run selftest</button><span id="status"></span>
-  <pre id="out">等待运行…</pre>
-  <footer>需要支持 wasm-gc 的浏览器（Chrome 119+ / Safari 18+ / Firefox 120+）。</footer>
-</main>
-<script type="module">
-const out = document.getElementById("out");
-const status = document.getElementById("status");
-const button = document.getElementById("run");
+<header>
+  <h1>mooncsg · 交互 demo</h1>
+  <p>SDF → marching tetrahedra → 水密三角网格，全部在 wasm-gc 里算，页面只做投影。</p>
+</header>
 
-async function run() {
-  button.disabled = true;
-  status.textContent = "";
-  status.className = "";
-  out.textContent = "加载 web.wasm…";
+<main>
+  <aside>
+    <div class="field">
+      <label for="shape">形状</label>
+      <select id="shape">
+        <option value="0">球</option>
+        <option value="1">立方体</option>
+        <option value="2">圆台（顶收到 0）</option>
+        <option value="3">胶囊</option>
+        <option value="4">环面</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label id="l1" for="r1">半径</label>
+      <div class="row">
+        <input id="r1" type="range" min="0.5" max="16" step="0.1" value="10">
+        <span class="val" id="v1">10.0</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <label id="l2" for="r2">管半径</label>
+      <div class="row">
+        <input id="r2" type="range" min="0.5" max="16" step="0.1" value="3">
+        <span class="val" id="v2">3.0</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="cut">减去偏移球（0 = 不减）</label>
+      <div class="row">
+        <input id="cut" type="range" min="0" max="16" step="0.1" value="0">
+        <span class="val" id="vc">0.0</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="res">网格分辨率</label>
+      <div class="row">
+        <input id="res" type="range" min="12" max="64" step="2" value="32">
+        <span class="val" id="vn">32</span>
+      </div>
+    </div>
+
+    <div class="row">
+      <button id="rebuild">重新网格化</button>
+      <button id="reset" class="ghost">复位视角</button>
+    </div>
+
+    <div class="hint">
+      拖拽旋转、滚轮缩放、双击复位。自动重建已开启；
+      分辨率越高越慢（64 大约要几秒）。
+    </div>
+
+    <div id="selftest">wasm 尚未加载…</div>
+    <div id="line">mooncsg …</div>
+  </aside>
+
+  <div id="stage">
+    <canvas id="canvas"></canvas>
+    <div id="metrics">等待构建…</div>
+    <div id="hud"></div>
+    <div id="err"></div>
+  </div>
+</main>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const canvas = $("canvas");
+const ctx = canvas.getContext("2d");
+const metricsEl = $("metrics");
+const hudEl = $("hud");
+const errEl = $("err");
+const selftestEl = $("selftest");
+const shapeEl = $("shape");
+const r1El = $("r1");
+const r2El = $("r2");
+const cutEl = $("cut");
+const resEl = $("res");
+
+// 每个形状的两个参数含义不同，改形状时同步标签与取值范围。
+const SHAPES = {
+  0: { l1: "半径", l2: null },
+  1: { l1: "边长", l2: null },
+  2: { l1: "底半径", l2: "高" },
+  3: { l1: "半径", l2: "圆柱段长" },
+  4: { l1: "管半径", l2: "环半径" },
+};
+
+const state = {
+  ex: null,
+  verts: null,   // Float32Array，xyz 交错
+  tris: null,    // Uint32Array，每 3 个一组
+  bbox: null,
+  tris_count: 0,
+  watertight: 0,
+  yaw: -0.6,
+  pitch: 0.5,
+  zoom: 1,
+  dragging: false,
+  lastX: 0,
+  lastY: 0,
+  needDraw: false,
+  builing: false,
+  queue: false,
+};
+
+function fmt(v, digits = 3) {
+  return v.toLocaleString("zh-CN", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+async function load() {
   try {
     const res = await fetch("./web.wasm", { cache: "no-store" });
     if (!res.ok) throw new Error(`web.wasm 不可用（HTTP ${res.status}）`);
     const { instance } = await WebAssembly.instantiate(await res.arrayBuffer(), {});
-    const ex = instance.exports;
-    const passed = ex.selftest();
-    let text = "";
-    const n = ex.report_len();
-    for (let i = 0; i < n; i++) {
-      text += String.fromCharCode(ex.report_code_unit(i));
-    }
-    out.textContent = text;
-    window.__mooncsg = { passed, text };
-    const ok = passed === 4;
-    status.textContent = ok ? "PASS" : "FAIL";
-    status.className = ok ? "pass" : "fail";
+    state.ex = instance.exports;
+    window.__wasm = state.ex;
+    await build();
+    runSelftest();
   } catch (err) {
-    out.textContent = String(err);
-    status.textContent = "ERROR";
-    status.className = "fail";
-    window.__mooncsg = { passed: 0, text: String(err) };
-  } finally {
-    button.disabled = false;
+    errEl.textContent = String(err);
   }
 }
 
-button.addEventListener("click", run);
-
-// ?selftest=1 时自动跑一次，方便 CI / headless 直接判定，
-// 也方便人工在地址栏里敲一下就得到结论。
-if (new URL(location.href).searchParams.has("selftest")) {
-  run();
+// 把 wasm 里的网格读成 JS 侧的类型化数组：之后每帧的变换和排序都在
+// JS 里做，不再逐顶点回调 wasm。
+function readScene() {
+  const ex = state.ex;
+  const nv = ex.vertex_count();
+  const nt = ex.triangle_count();
+  const verts = new Float32Array(nv * 3);
+  for (let i = 0; i < nv * 3; i++) verts[i] = ex.pos(i);
+  const tris = new Uint32Array(nt * 3);
+  for (let i = 0; i < nt * 3; i++) tris[i] = ex.tri_index(i);
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < nv; i++) {
+    for (let k = 0; k < 3; k++) {
+      const v = verts[3 * i + k];
+      if (v < lo[k]) lo[k] = v;
+      if (v > hi[k]) hi[k] = v;
+    }
+  }
+  state.verts = verts;
+  state.tris = tris;
+  state.tris_count = nt;
+  state.bbox = { lo, hi };
+  state.watertight = ex.flag(0) === 1;
+  return { nv, nt };
 }
+
+async function build() {
+  if (!state.ex) return;
+  if (state.builing) { state.queue = true; return; }
+  state.builing = true;
+  state.queue = false;
+  errEl.textContent = "";
+  $("rebuild").disabled = true;
+  try {
+    // 让浏览器先画出「构建中」，否则同步的 wasm 调用会把这一帧吞掉。
+    await new Promise((r) => requestAnimationFrame(r));
+    const t0 = performance.now();
+    const shape = Number(shapeEl.value);
+    const r1 = Number(r1El.value);
+    const r2 = Number(r2El.value);
+    const cut = Number(cutEl.value);
+    const res = Number(resEl.value);
+    const counts = state.ex.build(shape, r1, r2, cut, res);
+    const ms = performance.now() - t0;
+    const { nv, nt } = readScene();
+    // 显示「实际」格点：请求 64 被收窄时滑杆不会告诉你，这行会。
+    const g = [ex.grid_dim(0), ex.grid_dim(1), ex.grid_dim(2)];
+    state.grid = g;
+    hudEl.textContent =
+      `${g[0]}×${g[1]}×${g[2]} 格点 · ${ms.toFixed(0)} ms · ` +
+      `${fmt((ms / Math.max(nt, 1)) * 1000, 1)} µs/三角`;
+    renderMetrics(counts, nv, nt);
+    state.needDraw = true;
+    draw();
+  } catch (err) {
+    errEl.textContent = String(err);
+  } finally {
+    state.builing = false;
+    $("rebuild").disabled = false;
+    if (state.queue) build();
+  }
+}
+
+function renderMetrics(tris, verts, nt) {
+  const ex = state.ex;
+  const vol = ex.metric(0);
+  const area = ex.metric(1);
+  const euler = ex.flag(1);
+  const genus = ex.flag(2);
+  const wt = state.watertight
+    ? '<b>是</b>'
+    : '<span class="bad">否</span>';
+  const genusText = genus >= 0
+    ? String(genus)
+    : `<span class="warn">${genus}</span>`;
+  metricsEl.innerHTML =
+    `三角 <b>${tris.toLocaleString("zh-CN")}</b> · 顶点 <b>${verts.toLocaleString("zh-CN")}</b><br>` +
+    `体积 <b>${fmt(vol)}</b> · 面积 <b>${fmt(area)}</b><br>` +
+    `水密 ${wt} · χ = <b>${euler}</b> · 亏格 ${genusText}`;
+  window.__scene = {
+    tris, verts, vol, area, watertight: state.watertight, euler, genus,
+    grid: state.grid,
+  };
+  if (nt === 0) metricsEl.innerHTML = "空网格（cut 大于形状本身？）";
+}
+
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+    state.needDraw = true;
+  }
+  if (state.needDraw) draw();
+}
+
+// 软件渲染：正交投影 + 画家算法 + 单灯 lambert。三角数到十万级，
+// 每帧这里就是页面唯一的性能瓶颈，所以能省的分支都省掉。
+function draw() {
+  state.needDraw = false;
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#0f1115";
+  ctx.fillRect(0, 0, w, h);
+  const verts = state.verts;
+  const tris = state.tris;
+  if (!verts || !tris || state.tris_count === 0) return;
+
+  const { lo, hi } = state.bbox;
+  const cx = (lo[0] + hi[0]) / 2;
+  const cy = (lo[1] + hi[1]) / 2;
+  const cz = (lo[2] + hi[2]) / 2;
+  const extent = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1;
+  const scale = (Math.min(w, h) * 0.42 * state.zoom) / (extent * 0.5);
+
+  const cyaw = Math.cos(state.yaw), syaw = Math.sin(state.yaw);
+  const cpit = Math.cos(state.pitch), spit = Math.sin(state.pitch);
+  const nv = verts.length / 3;
+
+  // 视图空间坐标：先绕 Y 偏航，再绕 X 俯仰。
+  const vx = new Float32Array(nv);
+  const vy = new Float32Array(nv);
+  const vz = new Float32Array(nv);
+  // 光方向在视图空间里固定，转动模型时高光跟着走，读起来更立体。
+  const lx = -0.45, ly = 0.55, lz = -0.7;
+  for (let i = 0; i < nv; i++) {
+    const x = verts[3 * i] - cx;
+    const y = verts[3 * i + 1] - cy;
+    const z = verts[3 * i + 2] - cz;
+    const x1 = x * cyaw + z * syaw;
+    const z1 = -x * syaw + z * cyaw;
+    const y2 = y * cpit - z1 * spit;
+    const z2 = y * spit + z1 * cpit;
+    vx[i] = x1;
+    vy[i] = y2;
+    vz[i] = z2;
+  }
+
+  const nt = tris.length / 3;
+  const depth = new Float32Array(nt);
+  const order = new Uint32Array(nt);
+  for (let t = 0; t < nt; t++) {
+    const a = tris[3 * t], b = tris[3 * t + 1], c = tris[3 * t + 2];
+    depth[t] = vz[a] + vz[b] + vz[c];
+    order[t] = t;
+  }
+  // 画家算法：远的先画（视图空间 z 越大越远）。
+  const sorted = Array.prototype.slice.call(order);
+  sorted.sort((p, q) => depth[q] - depth[p]);
+
+  ctx.lineJoin = "round";
+  const hw = w / 2, hh = h / 2;
+  for (let k = 0; k < nt; k++) {
+    const t = sorted[k];
+    const ia = tris[3 * t], ib = tris[3 * t + 1], ic = tris[3 * t + 2];
+    const ax = hw + vx[ia] * scale, ay = hh - vy[ia] * scale;
+    const bx = hw + vx[ib] * scale, by = hh - vy[ib] * scale;
+    const cx2 = hw + vx[ic] * scale, cy2 = hh - vy[ic] * scale;
+    // 背面剔除：屏幕空间有向面积 > 0（y 轴翻转后顺时针）。
+    const area2 = (bx - ax) * (cy2 - ay) - (by - ay) * (cx2 - ax);
+    if (area2 >= 0) continue;
+    if (area2 > -0.6) continue; // 太小的三角对成像没贡献
+
+    // 视图空间的法线 → 固定光源做 lambert，再按朝向补一点冷色。
+    const e1x = vx[ib] - vx[ia], e1y = vy[ib] - vy[ia], e1z = vz[ib] - vz[ia];
+    const e2x = vx[ic] - vx[ia], e2y = vy[ic] - vy[ia], e2z = vz[ic] - vz[ia];
+    let nx = e1y * e2z - e1z * e2y;
+    let ny = e1z * e2x - e1x * e2z;
+    let nz = e1x * e2y - e1y * e2x;
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    nx /= nl; ny /= nl; nz /= nl;
+    // 主光 + 边缘光：纯 lambert 在圆柱/圆锥侧面几乎是常数，看起来像块色板；
+    // 用 1-|n·view| 补一圈轮廓光，曲率就出来了。
+    let lam = nx * lx + ny * ly + nz * lz;
+    if (lam < 0) lam = 0;
+    const rim = 1 - (nz < 0 ? -nz : nz);
+    const shade = 0.16 + 0.7 * lam + 0.3 * rim * rim;
+    const r = Math.round(22 + 178 * shade);
+    const g = Math.round(96 + 134 * shade);
+    const bch = Math.round(168 + 87 * shade);
+    const color = `rgb(${r},${g},${bch})`;
+    ctx.fillStyle = color;
+    ctx.strokeStyle = color; // 同一色描边，盖住三角形之间的抗锯齿缝
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.lineTo(cx2, cy2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function requestDraw() {
+  if (state.needDraw) return;
+  state.needDraw = true;
+  requestAnimationFrame(resize);
+}
+
+function syncLabels() {
+  const s = SHAPES[shapeEl.value];
+  $("l1").textContent = s.l1;
+  $("l2").textContent = s.l2 ?? "（本形状不用）";
+  r2El.disabled = s.l2 === null;
+  $("v1").textContent = Number(r1El.value).toFixed(1);
+  $("v2").textContent = Number(r2El.value).toFixed(1);
+  $("vc").textContent = Number(cutEl.value).toFixed(1);
+  $("vn").textContent = resEl.value;
+}
+
+function runSelftest() {
+  if (!state.ex) return;
+  try {
+    const passed = state.ex.selftest();
+    let text = "";
+    const n = state.ex.report_len();
+    for (let i = 0; i < n; i++) text += String.fromCharCode(state.ex.report_code_unit(i));
+    // 一行可判定文本：无头浏览器 / CI 只需要抓这一行，
+    // 不必去解析上面那几行带对勾的中文。
+    const vol = state.ex.metric(0);
+    const line =
+      `mooncsg ${passed === 4 ? "ok" : "fail"} ` +
+      `tris=${state.tris_count} vol=${vol.toFixed(3)} ` +
+      `watertight=${state.watertight ? 1 : 0}`;
+    selftestEl.textContent = text + "\n" + line;
+    selftestEl.className = passed === 4 ? "pass" : "fail";
+    $("line").textContent = line;
+    console.log(line);
+    window.__mooncsg = { passed, text, line };
+  } catch (err) {
+    selftestEl.textContent = String(err);
+    selftestEl.className = "fail";
+    $("line").textContent = `mooncsg fail ${err}`;
+    window.__mooncsg = { passed: 0, text: String(err), line: `mooncsg fail ${err}` };
+  }
+}
+
+// ---- 交互 ----
+shapeEl.addEventListener("change", () => {
+  // 切到环面时给一组能看出洞的默认值，其它形状回到细长参数。
+  if (shapeEl.value === "4") {
+    r1El.value = "3";
+    r2El.value = "10";
+  } else if (shapeEl.value === "3") {
+    r1El.value = "4";
+    r2El.value = "10";
+  } else if (shapeEl.value === "2") {
+    r1El.value = "8";
+    r2El.value = "10";
+  } else {
+    r1El.value = "10";
+  }
+  syncLabels();
+  build();
+});
+
+for (const el of [r1El, r2El, cutEl]) {
+  el.addEventListener("input", () => {
+    syncLabels();
+    build();
+  });
+}
+resEl.addEventListener("input", () => {
+  syncLabels();
+  build();
+});
+
+$("rebuild").addEventListener("click", build);
+$("reset").addEventListener("click", () => {
+  state.yaw = -0.6;
+  state.pitch = 0.5;
+  state.zoom = 1;
+  requestDraw();
+});
+
+canvas.addEventListener("pointerdown", (e) => {
+  state.dragging = true;
+  state.lastX = e.clientX;
+  state.lastY = e.clientY;
+  canvas.classList.add("dragging");
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (!state.dragging) return;
+  const dx = e.clientX - state.lastX;
+  const dy = e.clientY - state.lastY;
+  state.lastX = e.clientX;
+  state.lastY = e.clientY;
+  state.yaw += dx * 0.01;
+  state.pitch = Math.max(-1.5, Math.min(1.5, state.pitch + dy * 0.01));
+  requestDraw();
+});
+canvas.addEventListener("pointerup", (e) => {
+  state.dragging = false;
+  canvas.classList.remove("dragging");
+  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+});
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  state.zoom = Math.max(0.3, Math.min(4, state.zoom * (e.deltaY > 0 ? 0.92 : 1.08)));
+  requestDraw();
+}, { passive: false });
+canvas.addEventListener("dblclick", () => {
+  state.yaw = -0.6;
+  state.pitch = 0.5;
+  state.zoom = 1;
+  requestDraw();
+});
+window.addEventListener("resize", requestDraw);
+
+// 允许用查询串预设参数，方便分享某个造型、也给 headless 检查用：
+// ?shape=4&r1=3&r2=10&cut=0&res=40
+function applyQuery() {
+  const q = new URL(location.href).searchParams;
+  const num = (key, el, lo, hi) => {
+    if (!q.has(key)) return;
+    const v = Number(q.get(key));
+    if (!Number.isFinite(v)) return;
+    el.value = String(Math.max(lo, Math.min(hi, v)));
+  };
+  if (q.has("shape")) {
+    const s = Number(q.get("shape"));
+    if (SHAPES[s]) shapeEl.value = String(s);
+  }
+  num("r1", r1El, 0.5, 16);
+  num("r2", r2El, 0.5, 16);
+  num("cut", cutEl, 0, 16);
+  num("res", resEl, 12, 64);
+}
+
+applyQuery();
+syncLabels();
+new ResizeObserver(requestDraw).observe($("stage"));
+load();
 </script>
 </body>
 </html>

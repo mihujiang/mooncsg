@@ -7,26 +7,32 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 可读的 MoonBit 代码——几何在数学上闭合（水密、朝向一致、体积可对数），
 而不是「看起来像」。
 
+在线演示：<https://mihujiang.github.io/mooncsg/>　　实测数字：见 [`ACCEPTANCE.md`](ACCEPTANCE.md)
+
 ## 现状
 
 已覆盖 M0–M6：
 
 - `vec.mbt`：`Vec3` / `Mat3` / `Aabb`
-- `sdf.mbt`：球、盒、半空间、圆柱、环面；平移/旋转/缩放；并/交/差/平滑并；
-  保守包围盒
+- `sdf.mbt`：球、盒、半空间、圆柱、圆台、胶囊、环面；平移/旋转/缩放；
+  并/交/差/平滑并；包围盒
 - `marching.mbt`：规则体素 + 6 四面体分解 + 边键焊接 + 梯度投影
 - `mesh.mbt`：散度体积、面积、水密判定、欧拉示性数 / 亏格（只对单个闭合壳
   有定义，多壳返回 `-1`）、FNV-1a 指纹
 - `export.mbt`：OBJ、ASCII STL、二进制 STL，以及二进制 STL 回读
-- `examples/web`：wasm 验收壳（页面 + `?selftest=1` 自动跑）
+- `examples/web`：交互 demo（调参 → 网格 → canvas 2D 软件投影 + 体积/面积/拓扑），
+  页面里带 `?selftest=1` 的验收路径
 - `examples/bench`：网格化耗时基线（native / js / wasm-gc 同一份代码）
 - `tools/oracle.py`：独立解析基准（只用标准库）
 - `tools/wasm_check.mjs`：在 Node 里实例化同一份 wasm 跑验收
+- `tools/scene_check.mjs`：在 Node 里校验交互 demo 的 wasm 接口（建网格/读坐标/读指标）
+- `tools/serve.mjs`：本地静态服务，`node tools/serve.mjs` → http://127.0.0.1:8000/
 - `tools/acceptance.mjs`：一条命令跑全部验收项并打表
+- `tools/publish.mjs`：发布 + 发布后回拉验证（见下）
 
 ## 安装
 
-已发布到 mooncakes（`weopqrst/mooncsg@0.1.2`）：
+已发布到 mooncakes（`weopqrst/mooncsg@0.1.3`）：
 
 ```bash
 moon add weopqrst/mooncsg
@@ -36,7 +42,7 @@ moon add weopqrst/mooncsg
 
 ```moonbit
 import {
-  "weopqrst/mooncsg@0.1.2",
+  "weopqrst/mooncsg@0.1.3",
 }
 ```
 
@@ -45,20 +51,26 @@ import {
 ## 快速开始
 
 ```bash
-moon test                 # 33 个测试（native / js / wasm-gc 都要跑）
+moon test                 # 41 个测试（native / js / wasm-gc 都要跑）
 moon run examples/demo    # 盒减球，打印体积/面积/拓扑
 moon run examples/bench --release   # 网格化耗时基线
 moon check --deny-warn
 moon fmt --check
 
-# 浏览器验收壳
+# 交互 demo（调参 + canvas 投影）
 node tools/build_web.mjs  # 编译 wasm 并复制到 examples/web/
-node tools/serve.mjs      # 打开 http://localhost:8000/?selftest=1
-node tools/wasm_check.mjs # 不开浏览器，在 Node 里跑同一份 wasm
+node tools/serve.mjs      # 打开 http://127.0.0.1:8000/
+node tools/wasm_check.mjs # 不开浏览器，在 Node 里跑同一份 wasm 的验收项
+node tools/scene_check.mjs # 在 Node 里跑 demo 用到的场景接口
 
-# 一次跑完全部验收项（check/fmt/三后端测试/package/demo/web/oracle）
+# 一次跑完全部验收项（check/fmt/三后端测试/package/demo/bench/web/oracle）
 node tools/acceptance.mjs
 ```
+
+交互 demo 的形状与参数：球（半径）、立方体（边长）、圆台（底半径 + 高）、
+胶囊（半径 + 圆柱段长）、环面（管半径 + 环半径），外加「减去偏移球」的挖切；
+拖拽旋转、滚轮缩放、双击复位。分辨率滑杆控制的是请求值，指标区显示的是
+**实际**格点数（超过 `MAX_GRID_SLOTS` 会被自动收窄，见下）。
 
 `examples/demo` 的输出（盒减球，48 分辨率）：
 
@@ -85,16 +97,25 @@ stl bytes:  26192644
 先跑一次预热，再取三次的最小值。机器：Intel Core Ultra 9 275HX / Windows 11 /
 Node 24（wasm-gc 与 js 都跑在 V8 上）。
 
-| 用例 | 三角形 | wasm-gc | js |
-| --- | --- | --- | --- |
-| 球 r=10，32³ | 26280 | 13.1 ms | 37.6 ms |
-| 球 r=10，64³ | 104688 | 64.1 ms | 165.1 ms |
-| 立方体 40³ 挖球 r=24，48³ | 107280 | 87.5 ms | 220.1 ms |
-| 环面 R=8 r=3，48³ | 36172 | 20.3 ms | 40.5 ms |
+「实际格点」一列是 `grid_shape()` 报的值：`resolution` 只是请求值，超过
+`MAX_GRID_SLOTS`（16.7M 个采样点）会被按 1.25 倍步长收窄。所以请求 256 的
+立方包围盒实际跑的是 205³——表里照实写。
+
+| 用例 | 三角形 | 实际格点 | wasm-gc | js |
+| --- | --- | --- | --- | --- |
+| 球 r=10，请求 32 | 26280 | 32³ | 13.6 ms | 33.9 ms |
+| 球 r=10，请求 64 | 104688 | 64³ | 64.9 ms | 161.9 ms |
+| 立方体 40³ 挖球 r=24，请求 48 | 107280 | 48³ | 84.7 ms | 206.0 ms |
+| 环面 R=8 r=3，请求 48 | 36172 | 48×48×15 | 19.3 ms | 40.3 ms |
+| 球 r=25，请求 128 | 443736 | 128³ | 391.8 ms | 1158 ms |
+| 球 r=25，请求 256 | 1135968 | **205³**（被收窄） | 1713.8 ms | 4092 ms |
+
+后两行用 `moon run examples/bench --release -- big` 才跑（默认不跑，js 后端
+那两档要几秒，塞进 CI 会把 bench 这条 step 拖成分钟级）。
 
 两点说明：
 
-- **wasm-gc 比 js 后端快 1.9–2.9 倍**，这是同一份 MoonBit 源码换后端的结果，
+- **wasm-gc 比 js 后端快 2.1–3.0 倍**，这是同一份 MoonBit 源码换后端的结果，
   不是两份实现——wasm-gc 直接吃 `f64` 运算，js 后端还要过一层 BigInt/boxing 的
   边界检查。
 - **native 数字本地没有**：这台 Windows 机器没装 MSVC Build Tools，native 后端

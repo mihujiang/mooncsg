@@ -215,3 +215,80 @@ test "zero thickness and empty cases stay finite" {
     i = i + 1
   }
 }
+
+///|
+test "cone degenerates to cylinder when radii match" {
+  let cone = @mooncsg.Sdf::cone(7.0, 7.0, 10.0)
+  let cyl = @mooncsg.Sdf::cylinder(7.0, 10.0)
+  let mut i = 0
+  while i < 1000 {
+    let p = sample(2024UL, i)
+    assert_true((cone.eval(p) - cyl.eval(p)).abs() < 1.0e-12)
+    i = i + 1
+  }
+}
+
+///|
+test "cone matches analytic distance on the axis and the apex" {
+  // 圆锥：z=-10 处半径 0（顶点），z=+10 处半径 5。
+  // 侧棱在 (radial, axial) 平面是直线 4*radial - axial - 10 = 0，
+  // 原点到这条直线的距离是 10/sqrt(17)。
+  let cone = @mooncsg.Sdf::cone(0.0, 5.0, 10.0)
+  assert_true(
+    (cone.eval(@mooncsg.Vec3::new(0.0, 0.0, 0.0)) + 2.4253562503633324).abs() <
+    1.0e-12,
+  )
+  // 顶点正下方 1 个单位
+  assert_true(
+    (cone.eval(@mooncsg.Vec3::new(0.0, 0.0, -11.0)) - 1.0).abs() < 1.0e-12,
+  )
+  // 顶点本身
+  assert_true(cone.eval(@mooncsg.Vec3::new(0.0, 0.0, -10.0)).abs() < 1.0e-12)
+}
+
+///|
+test "capsule matches analytic distance and degenerates to sphere" {
+  let ball = @mooncsg.Sdf::sphere(7.0)
+  let degenerate = @mooncsg.Sdf::capsule(7.0, 0.0)
+  let mut i = 0
+  while i < 1000 {
+    let p = sample(5150UL, i)
+    assert_true((degenerate.eval(p) - ball.eval(p)).abs() < 1.0e-12)
+    i = i + 1
+  }
+  let cap = @mooncsg.Sdf::capsule(3.0, 5.0)
+  assert_true(
+    (cap.eval(@mooncsg.Vec3::new(0.0, 0.0, 9.0)) - 1.0).abs() < 1.0e-12,
+  )
+  assert_true(
+    (cap.eval(@mooncsg.Vec3::new(0.0, 0.0, -9.0)) - 1.0).abs() < 1.0e-12,
+  )
+  assert_true(
+    (cap.eval(@mooncsg.Vec3::new(4.0, 0.0, 3.0)) - 1.0).abs() < 1.0e-12,
+  )
+  assert_true(
+    (cap.eval(@mooncsg.Vec3::new(0.0, 0.0, 0.0)) + 3.0).abs() < 1.0e-12,
+  )
+  // 精确 SDF 的梯度模长为 1
+  assert_true(
+    (cap.gradient(@mooncsg.Vec3::new(10.0, 0.0, 0.0)).length() - 1.0).abs() <
+    1.0e-6,
+  )
+}
+
+///|
+test "cone and capsule bounds cover the solid" {
+  match @mooncsg.Sdf::cone(2.0, 9.0, 10.0).bounds() {
+    Some(b) => {
+      assert_true((b.max.x - 9.0).abs() < 1.0e-12)
+      assert_true((b.max.z - 10.0).abs() < 1.0e-12)
+      assert_true(b.contains(@mooncsg.Vec3::new(0.0, 0.0, 9.0)))
+      assert_true(!b.contains(@mooncsg.Vec3::new(9.5, 0.0, 0.0)))
+    }
+    None => fail("cone must have bounds")
+  }
+  match @mooncsg.Sdf::capsule(3.0, 5.0).bounds() {
+    Some(b) => assert_true((b.max.z - 8.0).abs() < 1.0e-12)
+    None => fail("capsule must have bounds")
+  }
+}

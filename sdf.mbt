@@ -19,6 +19,12 @@ pub(all) enum Sdf {
   Cylinder(Vec3, Double, Double)
   /// 环面：轴沿 z，`center` + 母线半径 `big` + 管半径 `small`。
   Torus(Vec3, Double, Double)
+  /// 圆台：轴沿 z，`center` + 半高 `half_height` + 下端半径 `r1` + 上端半径 `r2`。
+  /// `r1 == r2` 退化为圆柱，`r1 == 0` 或 `r2 == 0` 退化为圆锥。
+  Cone(Vec3, Double, Double, Double)
+  /// 胶囊：轴沿 z，`center` + 半径 `radius` + 圆心段半高 `half_height`。
+  /// `half_height == 0` 退化为球。
+  Capsule(Vec3, Double, Double)
   /// 平移：先减去 `t` 再求值。
   Translate(Sdf, Vec3)
   /// 旋转：`m` 的列是局部基，求值时用转置把世界坐标拉回局部。
@@ -55,6 +61,17 @@ pub fn Sdf::plane(normal : Vec3, offset : Double) -> Sdf {
 ///|
 pub fn Sdf::cylinder(radius : Double, half_height : Double) -> Sdf {
   Cylinder(Vec3::zero(), radius, half_height)
+}
+
+///|
+/// 圆台：`r1` 是 `z = -half_height` 处的半径，`r2` 是 `z = +half_height` 处的半径。
+pub fn Sdf::cone(r1 : Double, r2 : Double, half_height : Double) -> Sdf {
+  Cone(Vec3::zero(), half_height, r1, r2)
+}
+
+///|
+pub fn Sdf::capsule(radius : Double, half_height : Double) -> Sdf {
+  Capsule(Vec3::zero(), radius, half_height)
 }
 
 ///|
@@ -153,6 +170,59 @@ pub fn Sdf::eval(self : Sdf, p : Vec3) -> Double {
     Torus(c, big, small) => {
       let q = p.sub(c)
       len2(len2(q.x, q.y) - big, q.z) - small
+    }
+    Cone(c, h, r1, r2) => {
+      // 半径取非负：负半径没有几何意义，按 0 处理，与 `bounds` 一致。
+      let lo = if r1 > 0.0 { r1 } else { 0.0 }
+      let hi = if r2 > 0.0 { r2 } else { 0.0 }
+      let q = p.sub(c)
+      let rad = len2(q.x, q.y)
+      let axial = q.z
+      // 帽（上下两个圆盘）：径向差 + 轴向超出量
+      let cap_r = if axial < 0.0 { lo } else { hi }
+      let ca_rad = rad - (if rad < cap_r { rad } else { cap_r })
+      let ca_ax = (if axial < 0.0 { -axial } else { axial }) - h
+      // 侧棱：把 q 投到 (lo, -h) -> (hi, h) 这条线段上，取剩余向量
+      let k2_rad = hi - lo
+      let k2_ax = 2.0 * h
+      let denom = k2_rad * k2_rad + k2_ax * k2_ax
+      let t = if denom <= 1.0e-30 {
+        0.0
+      } else {
+        let u = ((hi - rad) * k2_rad + (h - axial) * k2_ax) / denom
+        if u < 0.0 {
+          0.0
+        } else if u > 1.0 {
+          1.0
+        } else {
+          u
+        }
+      }
+      let cb_rad = rad - hi + k2_rad * t
+      let cb_ax = axial - h + k2_ax * t
+      let d_cap = len2(ca_rad, ca_ax)
+      let d_side = len2(cb_rad, cb_ax)
+      let m = if d_cap < d_side { d_cap } else { d_side }
+      // 在侧棱内侧且未超出上下帽时是内部点
+      if cb_rad < 0.0 && ca_ax < 0.0 {
+        -m
+      } else {
+        m
+      }
+    }
+    Capsule(c, r, h) => {
+      // 把 z 折到线段 [-h, h] 上：落在线段内时轴向分量为 0，剩下的就是
+      // 到线段的距离。注意不能写成 `|z| - h`——那样线段内的点会得到负的
+      // 轴向分量，平方后被当成真实距离，胶囊中段的点会被算远 0.4 个单位。
+      let q = p.sub(c)
+      let axial = if q.z < -h {
+        q.z + h
+      } else if q.z > h {
+        q.z - h
+      } else {
+        0.0
+      }
+      len2(len2(q.x, q.y), axial) - r
     }
     Translate(s, t) => s.eval(p.sub(t))
     Rotate(s, m) => s.eval(m.transpose().mul_vec(p))
@@ -255,6 +325,15 @@ pub fn Sdf::bounds(self : Sdf) -> Aabb? {
           ),
         ),
       )
+    Cone(c, h, r1, r2) => {
+      let rr = if r1 > r2 { r1 } else { r2 }
+      let rr = if rr > 0.0 { rr } else { 0.0 }
+      Some(Aabb::from_center_half(c, Vec3::new(rr, rr, h)))
+    }
+    Capsule(c, r, h) => {
+      let rr = if r > 0.0 { r } else { 0.0 }
+      Some(Aabb::from_center_half(c, Vec3::new(rr, rr, h + rr)))
+    }
     Translate(s, t) =>
       match s.bounds() {
         Some(b) => Some(Aabb::new(b.min.add(t), b.max.add(t)))

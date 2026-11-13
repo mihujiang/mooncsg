@@ -40,8 +40,11 @@ fn bench_case(name : String, s : @mooncsg.Sdf, res : Int32) -> Unit {
     i = i + 1
   }
   let ms = best / 1000.0
+  // 打印「实际」格点数而不是回显 res：超过 MAX_GRID_SLOTS 时请求值会被收窄，
+  // 只写 res=256 会让读表的人以为真的跑了 256³。
+  let (nx, ny, nz) = @mooncsg.grid_shape(b, res)
   println(
-    "\{name} res=\{res} tris=\{warm.triangle_count()} verts=\{warm.vertex_count()} ms=\{ms}",
+    "\{name} res=\{res} grid=\{nx}x\{ny}x\{nz} tris=\{warm.triangle_count()} verts=\{warm.vertex_count()} ms=\{ms}",
   )
 }
 
@@ -61,4 +64,11 @@ fn main {
     @mooncsg.Sdf::Torus(@mooncsg.Vec3::zero(), 8.0, 3.0),
     48,
   )
+  // 大分辨率那两档单独开关：js 后端跑一次要十几秒，进 CI 会把 bench
+  // 这条 step 拖成分钟级。默认不跑，`moon run examples/bench --release -- big`
+  // 才跑，README 里的 128³/256³ 数字是这么量出来的。
+  if @env.args().contains("big") {
+    bench_case("sphere128", @mooncsg.Sdf::sphere(25.0), 128)
+    bench_case("sphere256", @mooncsg.Sdf::sphere(25.0), 256)
+  }
 }
