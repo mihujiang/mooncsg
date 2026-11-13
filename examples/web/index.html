@@ -186,6 +186,11 @@ const SHAPES = {
   4: { l1: "管半径", l2: "环半径" },
 };
 
+// 验收报告只在 ?selftest=1 时跑：`selftest` 会用自己的一组场景覆盖网格，
+// 无条件跑会让首屏显示的不是滑杆那组参数。
+const wantSelftest =
+  new URLSearchParams(location.search).get("selftest") === "1";
+
 const state = {
   ex: null,
   verts: null,   // Float32Array，xyz 交错
@@ -219,7 +224,14 @@ async function load() {
     state.ex = instance.exports;
     window.__wasm = state.ex;
     await build();
-    runSelftest();
+    if (wantSelftest) {
+      runSelftest();
+      // selftest 把网格换成了验收场景，这里再建一次，让画面回到面板参数。
+      await build();
+    } else {
+      selftestEl.hidden = true;
+      $("line").hidden = true;
+    }
   } catch (err) {
     errEl.textContent = String(err);
   }
@@ -259,6 +271,7 @@ async function build() {
   state.queue = false;
   errEl.textContent = "";
   $("rebuild").disabled = true;
+  const ex = state.ex;
   try {
     // 让浏览器先画出「构建中」，否则同步的 wasm 调用会把这一帧吞掉。
     await new Promise((r) => requestAnimationFrame(r));
@@ -268,7 +281,7 @@ async function build() {
     const r2 = Number(r2El.value);
     const cut = Number(cutEl.value);
     const res = Number(resEl.value);
-    const counts = state.ex.build(shape, r1, r2, cut, res);
+    const counts = ex.build(shape, r1, r2, cut, res);
     const ms = performance.now() - t0;
     const { nv, nt } = readScene();
     // 显示「实际」格点：请求 64 被收窄时滑杆不会告诉你，这行会。
@@ -444,6 +457,9 @@ function runSelftest() {
   if (!state.ex) return;
   try {
     const passed = state.ex.selftest();
+    // selftest 内部会重建网格：这里重新读一次，下面那行里的 tris /
+    // watertight 才是验收场景自己的数字，而不是上一帧留下的。
+    readScene();
     let text = "";
     const n = state.ex.report_len();
     for (let i = 0; i < n; i++) text += String.fromCharCode(state.ex.report_code_unit(i));
