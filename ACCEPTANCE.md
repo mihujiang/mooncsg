@@ -116,10 +116,10 @@ wasm-gc 上 13.6 ms → 1713.8 ms，三角形从 2.6 万到 114 万。js 后端�
   拓扑与包围盒收缩。
 - **浏览器实机**：本机只验证到 Edge（`playwright screenshot --channel=msedge`）
   的截图与单行结论；Safari / Firefox 未测。
-- **Pages 部署**：workflow 已提交，`build` job 的构建/校验/打包三步在 CI 上
-  实测通过；`configure-pages` 这一步要求仓库先在 Settings → Pages → Source
-  选一次 “GitHub Actions”（`GITHUB_TOKEN` 无 admin 权限，自助开启会 403），
-  所以首轮部署是失败的。这是仓库设置问题，不是产物问题。
+- **Pages 部署**：已上线 <https://mihujiang.github.io/mooncsg/>（run 在
+  `6e3cbfb` 上 success）。首轮失败是因为仓库没启用 Pages（`configure-pages`
+  报 Get Pages site failed），在 Settings → Pages → Source 选 “GitHub Actions”
+  之后重跑即通过。
 
 ## 这些断言真的能失败吗
 
