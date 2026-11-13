@@ -26,7 +26,7 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 
 ## 安装
 
-已发布到 mooncakes（`weopqrst/mooncsg@0.1.1`）：
+已发布到 mooncakes（`weopqrst/mooncsg@0.1.2`）：
 
 ```bash
 moon add weopqrst/mooncsg
@@ -36,7 +36,7 @@ moon add weopqrst/mooncsg
 
 ```moonbit
 import {
-  "weopqrst/mooncsg@0.1.1",
+  "weopqrst/mooncsg@0.1.2",
 }
 ```
 
