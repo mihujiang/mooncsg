@@ -148,12 +148,39 @@ pub fn Mesh::to_stl_binary(self : Mesh) -> Bytes {
 }
 
 ///|
+/// STL 顶点的分桶键：三个 `f32` 位模式用 FNV-1a 混成一个 64 位数。
+///
+/// 只用来分桶；桶里还要按坐标逐个精确比较，所以哈希碰撞不会把两个
+/// 不同顶点合并（碰撞只会让桶变长）。
+
+///|
+/// 两个坐标的 `f32` 位模式是否相同。用位模式而不是 `==`：`-0.0 == 0.0`
+/// 为真但位模式不同，而位模式才是「导出时写下的是同一个值」的判据。
+fn same_f32_bits(a : Double, b : Double) -> Bool {
+  Float::from_double(a).reinterpret_as_uint() ==
+  Float::from_double(b).reinterpret_as_uint()
+}
+
+///|
+fn stl_vertex_key(x : Double, y : Double, z : Double) -> UInt64 {
+  let mut h : UInt64 = 0xcbf29ce484222325UL
+  h = fnv1a(h, Float::from_double(x).reinterpret_as_uint().to_uint64())
+  h = fnv1a(h, Float::from_double(y).reinterpret_as_uint().to_uint64())
+  h = fnv1a(h, Float::from_double(z).reinterpret_as_uint().to_uint64())
+  h
+}
+
+///|
 /// 二进制 STL 回读。
 ///
 /// STL 没有索引，同一个顶点会在每个相邻三角形里重复出现。这里按
 /// `f32` 位模式做精确去重（不是 eps 距离）：同一位置写出去时位模式
 /// 相同，读回来也相同，所以能还原原始顶点数。这个等价关系只在
 /// 「导出后未经过任何编辑」时成立，正好是往返测试要的性质。
+///
+/// 实现上按 `UInt64` 哈希分桶、桶内比坐标：早期版本给每个顶点拼一个
+/// `String` 当键，十几万面的 STL 要构造几十万个字符串，回读时间和
+/// 内存都被这一项主导。
 pub fn Mesh::from_stl_binary(data : Bytes) -> Mesh? {
   if data.length() < 84 {
     return None
@@ -167,7 +194,7 @@ pub fn Mesh::from_stl_binary(data : Bytes) -> Mesh? {
   }
   let positions : Array[Vec3] = []
   let indices : Array[Int32] = []
-  let seen : @hashmap.HashMap[String, Int32] = @hashmap.HashMap(
+  let seen : @hashmap.HashMap[UInt64, Array[Int32]] = @hashmap.HashMap(
     [],
     capacity=1024,
   )
@@ -180,18 +207,35 @@ pub fn Mesh::from_stl_binary(data : Bytes) -> Mesh? {
       let x = read_f32(data, off)
       let y = read_f32(data, off + 4)
       let z = read_f32(data, off + 8)
-      let key = "\{Float::from_double(x).reinterpret_as_uint()}," +
-        "\{Float::from_double(y).reinterpret_as_uint()}," +
-        "\{Float::from_double(z).reinterpret_as_uint()}"
+      let key = stl_vertex_key(x, y, z)
+      let mut idx : Int32 = -1
       match seen.get(key) {
-        Some(idx) => indices.push(idx)
-        None => {
-          let idx : Int32 = positions.length()
-          positions.push(Vec3::new(x, y, z))
-          seen.set(key, idx)
-          indices.push(idx)
+        Some(bucket) => {
+          let mut j = 0
+          while j < bucket.length() && idx < 0 {
+            let p = positions[bucket[j]]
+            if same_f32_bits(p.x, x) &&
+              same_f32_bits(p.y, y) &&
+              same_f32_bits(p.z, z) {
+              idx = bucket[j]
+            }
+            j = j + 1
+          }
+        }
+        None => ()
+      }
+      if idx < 0 {
+        idx = positions.length()
+        positions.push(Vec3::new(x, y, z))
+        match seen.get(key) {
+          Some(bucket) => bucket.push(idx)
+          None => {
+            let bucket : Array[Int32] = [idx]
+            seen.set(key, bucket)
+          }
         }
       }
+      indices.push(idx)
       k = k + 1
     }
     t = t + 1

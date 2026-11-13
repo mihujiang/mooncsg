@@ -242,3 +242,19 @@ test "mesh hash distinguishes different inputs" {
   // 翻转朝向只改索引顺序，指纹必须随之变化，否则指纹覆盖不住拓扑。
   assert_true(fine.hash() != fine.flipped().hash())
 }
+
+///|
+test "two disjoint shells make genus undecidable" {
+  let left = @mooncsg.Sdf::sphere(5.0).at(@mooncsg.Vec3::new(-12.0, 0.0, 0.0))
+  let right = @mooncsg.Sdf::sphere(5.0).at(@mooncsg.Vec3::new(12.0, 0.0, 0.0))
+  let s = left.union(right)
+  let b = @mooncsg.Aabb::from_center_half(
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::new(17.0, 5.0, 5.0),
+  ).expand(0.5)
+  let m = @mooncsg.mesh(s, b, @mooncsg.MeshOptions::new(64))
+  assert_true(m.is_watertight())
+  // 两个闭合壳：χ = 2 + 2 = 4，(2 - χ) / 2 = -1 不是亏格，所以给 -1。
+  assert_eq(m.euler(), 4)
+  assert_eq(m.genus(), -1)
+}

@@ -15,7 +15,8 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 - `sdf.mbt`：球、盒、半空间、圆柱、环面；平移/旋转/缩放；并/交/差/平滑并；
   保守包围盒
 - `marching.mbt`：规则体素 + 6 四面体分解 + 边键焊接 + 梯度投影
-- `mesh.mbt`：散度体积、面积、水密判定、欧拉示性数 / 亏格、FNV-1a 指纹
+- `mesh.mbt`：散度体积、面积、水密判定、欧拉示性数 / 亏格（只对单个闭合壳
+  有定义，多壳返回 `-1`）、FNV-1a 指纹
 - `export.mbt`：OBJ、ASCII STL、二进制 STL，以及二进制 STL 回读
 - `examples/web`：wasm 验收壳（页面 + `?selftest=1` 自动跑）
 - `examples/bench`：网格化耗时基线（native / js / wasm-gc 同一份代码）
@@ -44,7 +45,7 @@ import {
 ## 快速开始
 
 ```bash
-moon test                 # 31 个测试（native / js / wasm-gc 都要跑）
+moon test                 # 33 个测试（native / js / wasm-gc 都要跑）
 moon run examples/demo    # 盒减球，打印体积/面积/拓扑
 moon run examples/bench --release   # 网格化耗时基线
 moon check --deny-warn

@@ -137,3 +137,25 @@ test "empty mesh round trips through binary stl" {
     None => assert_true(false)
   }
 }
+
+///|
+test "binary stl round trip welds both shells of a two shell mesh" {
+  let left = @mooncsg.Sdf::sphere(5.0).at(@mooncsg.Vec3::new(-12.0, 0.0, 0.0))
+  let right = @mooncsg.Sdf::sphere(5.0).at(@mooncsg.Vec3::new(12.0, 0.0, 0.0))
+  let s = left.union(right)
+  let b = @mooncsg.Aabb::from_center_half(
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::new(17.0, 5.0, 5.0),
+  ).expand(0.5)
+  let m = @mooncsg.mesh(s, b, @mooncsg.MeshOptions::new(64))
+  match @mooncsg.Mesh::from_stl_binary(m.to_stl_binary()) {
+    Some(back) => {
+      // 分桶去重必须和原始顶点数完全一致：少一个说明两个不同顶点被误合并，
+      // 多一个说明同一个顶点没焊上。
+      assert_eq(back.vertex_count(), m.vertex_count())
+      assert_eq(back.triangle_count(), m.triangle_count())
+      assert_true(back.is_watertight())
+    }
+    None => assert_true(false)
+  }
+}
