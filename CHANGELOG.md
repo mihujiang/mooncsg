@@ -2,6 +2,23 @@
 
 按里程碑记录，每条都挂 commit。版本号按 mooncakes 的 0.x 规则走。
 
+## 未发布
+
+### Added
+
+- **`tools/volume_check.mjs`**：体积对拍真的比阈值。原来 acceptance 里那一步
+  只跑 `python tools/oracle.py`，打印完就 exit 0——PASS 不代表任何事；现在跑
+  `cmd/main --stats` 拿实测体积，和 `oracle.py --cases` 的解析值逐组比容差，
+  超差退出 1。
+- **`LICENSE`**：Apache-2.0 全文（此前只有 `moon.mod` 的 `license` 字段）。
+
+### Fixed
+
+- `tools/oracle.py` 补圆台 / 胶囊的解析式与 `--cases`；docstring 里那句不存在
+  的 `--check` 和早就改名的 `acceptance.ps1` 一并删掉。
+- 文档里过期的量：代码行数（2748 → 2970）、`moon test` 的口径（41 块 /
+  216 用例）、圆台与减球的体积实测值、性能基线改成同一台机器的同一轮实测。
+
 ## 0.1.3 — 2026-11-13
 
 ### Added

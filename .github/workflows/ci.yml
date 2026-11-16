@@ -85,5 +85,7 @@ jobs:
         run: moon run examples/bench --release
 
       # 验收数字必须能在 CI 里复算：Python 只算解析式，不 import 几何库。
-      - name: analytic oracle
-        run: python3 tools/oracle.py
+      # 只跑 oracle.py 是没意义的（它打印完就 exit 0），所以这里跑
+      # volume_check.mjs：跑 cmd/main --stats 拿实测体积，逐组比阈值。
+      - name: volume check
+        run: node tools/volume_check.mjs

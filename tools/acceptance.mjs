@@ -52,11 +52,14 @@ const steps = [
 ];
 
 // Python 基准是可选的：机器上没装 python 时跳过，不判失败。
+// 注意这里是 volume_check 而不是直接跑 oracle.py：后者只打印解析值就
+// exit 0，PASS 只能说明脚本能跑；前者会把解析值和 cmd/main 的实测体积
+// 逐组比阈值，超差就退出非 0。
 const python = process.platform === "win32" ? "python" : "python3";
 if (spawnSync(python, ["--version"], { shell: true }).status === 0) {
-  steps.push({ name: "analytic oracle", cmd: python, args: ["tools/oracle.py"], shell: true });
+  steps.push({ name: "volume check", cmd: process.execPath, args: ["tools/volume_check.mjs"] });
 } else {
-  steps.push({ name: "analytic oracle", skip: "python 不可用" });
+  steps.push({ name: "volume check", skip: "python 不可用" });
 }
 
 const rows = [];

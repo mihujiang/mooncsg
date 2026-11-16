@@ -22,49 +22,53 @@ node tools/acceptance.mjs
 实际输出（2026-11-13）：
 
 ```
-PASS  check            1046 ms
-PASS  fmt               823 ms
-SKIP  test native      本机无 native 工具链
-PASS  test wasm-gc     5539 ms
-PASS  test js          8513 ms
-PASS  package          1565 ms
-PASS  demo              903 ms
-PASS  bench            1062 ms
-PASS  build web         292 ms
-PASS  wasm selftest     367 ms
-PASS  wasm scene       1183 ms
-PASS  analytic oracle   319 ms
+PASS  check          834 ms
+PASS  fmt            95 ms
+SKIP  test native    本机无 native 工具链
+PASS  test wasm-gc   4862 ms
+PASS  test js        8448 ms
+PASS  package        914 ms
+PASS  demo           881 ms
+PASS  bench          971 ms
+PASS  build web      180 ms
+PASS  wasm selftest  358 ms
+PASS  wasm scene     1160 ms
+PASS  volume check   2386 ms
 
 没有失败项（共 12 项）
 ```
 
 毫秒列随机器负载浮动，判定只看 PASS / SKIP 两列。
 
-`test wasm-gc` 内部是 `Total tests: 41, passed: 41, failed: 0.`
-（其中 4 个是新加的圆台/胶囊断言，2 个是 `grid_shape` 的格点规划断言）。
+`test wasm-gc` 内部是 `Total tests: 216, passed: 216, failed: 0.`——源码里
+是 41 个 `test` 块，MoonBit 把块内每个 `assert_*` / `inspect` 记成一个用例，
+所以「41 块 / 216 用例」是同一件事的两种数法。
 
 ## 精度：实测 vs 解析
 
 网格一律用 `resolution = 48`（`grid_shape` 报 48³，未被 `MAX_GRID_SLOTS` 收窄），
 体积由散度定理在三角网格上精确累加，解析值由 `tools/oracle.py`（纯标准库，
-独立实现）给出。
+独立实现）给出，`node tools/volume_check.mjs` 把两边逐组比阈值（球/盒/减球
+0.5 %，圆台/胶囊/环面 1 %），超差就退出非 0——这一项 PASS 是真的判过阈值，
+不是「脚本能跑」。
 
 | 形状 | 解析体积 | 实测体积 | 相对误差 | 判定 |
 | --- | --- | --- | --- | --- |
 | 球 r=10 | 4188.790 | 4186.821 | 0.047 % | < 0.5 % ✓ |
 | 立方体 边长 10 | 1000.000 | 998.946 | 0.105 % | < 0.5 % ✓ |
-| 圆台 底 8 / 高 10（顶收到 0） | 670.206 | 668.397 | 0.270 % | < 1 % ✓ |
-| 胶囊 半径 4 / 段长 10 | 770.733 | 769.716 | 0.132 % | < 1 % ✓ |
-| 环面 管 3 / 环 10 | 1776.528 | 1771.444 | 0.286 % | < 1 % ✓ |
-| 立方体 40×30×20 减球 r=12 | 17046.608 | 17058.879 | 0.072 % | < 0.5 % ✓ |
+| 圆台 底 8 / 高 10（顶收到 0） | 670.206 | 668.515 | 0.252 % | < 1 % ✓ |
+| 胶囊 半径 4 / 段长 10 | 770.737 | 769.716 | 0.132 % | < 1 % ✓ |
+| 环面 管 3 / 环 10 | 1776.529 | 1771.444 | 0.286 % | < 1 % ✓ |
+| 立方体 40×30×20 减球 r=12 | 17046.608 | 17058.106 | 0.067 % | < 0.5 % ✓ |
 
 圆台和胶囊的误差天然比球大：它们有尖锐的棱（圆台顶点的锥尖、胶囊的
 圆柱-半球接缝），marching tetrahedra 在棱附近只能用细长三角逼近曲面。
-0.27 % / 0.13 % 是 `res = 48` 下的实际水平，不是常数——加密到 128 会更小。
+0.25 % / 0.13 % 是 `res = 48` 下的实际水平，不是常数——加密到 128 会更小。
 
-「减球」这一项唯一的解析值来自 `oracle.py`：球心在盒内、半径 12 小于盒的
-最短半边长 10+ 的容积关系，挖掉的部分是一个完整的球，所以
-`24000 − 4/3·π·12³ = 17046.608`。
+「减球」这一项的解析值来自 `oracle.py` 的 `box_minus_sphere`：球半径 12
+大于盒半高 10，球在 z 方向穿出盒外，挖掉的不是整球而是被 `z = ±10` 两个
+平面夹住的**球带**，`V = 2πa(r² − a²/3)`（`a = 10`），所以
+`24000 − 2π·10·(144 − 100/3) = 17046.608`。`examples/demo` 打印的就是这个式子。
 
 ## 拓扑：每个形状都必须是闭合流形
 
@@ -103,15 +107,15 @@ mooncsg ok tris=26280 vol=4184.412 watertight=1
 ## 性能
 
 见 README「性能基线」：`res` 从 32 到 256（实际被收窄到 205³），单线程
-wasm-gc 上 13.6 ms → 1713.8 ms，三角形从 2.6 万到 114 万。js 后端慢
-2.1–3.0 倍。这两档大分辨率用 `moon run examples/bench --release -- big` 才会跑。
+wasm-gc 上 13.9 ms → 1419.9 ms，三角形从 2.6 万到 114 万。js 后端慢
+2.2–2.6 倍。这两档大分辨率用 `moon run examples/bench --release -- big` 才会跑。
 
 ## 没覆盖到的
 
 - **native 耗时**：本机无 MSVC，本表不编数字。CI 的 ubuntu runner 跑
   `moon test --target native` 做正确性覆盖。
-- **高分辨率精度**：128³ / 205³ 只记录了耗时与三角形数，没有与解析值对拍
-  （对拍成本主要在 `oracle.py` 侧，不是网格本身不可信）。
+- **高分辨率精度**：128³ / 205³ 只记录了耗时与三角形数，没有进对拍表——
+  单档要跑几十秒，`volume_check.mjs` 固定在 `res = 48`。
 - **偏置挖球的解析体积**：球减偏移球是透镜形，没有写解析式，只验了水密、
   拓扑与包围盒收缩。
 - **浏览器实机**：本机只验证到 Edge（`playwright screenshot --channel=msedge`）

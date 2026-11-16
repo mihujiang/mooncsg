@@ -28,7 +28,8 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 - `examples/web`：交互 demo（调参 → 网格 → canvas 2D 软件投影 + 体积/面积/拓扑），
   页面里带 `?selftest=1` 的验收路径
 - `examples/bench`：网格化耗时基线（native / js / wasm-gc 同一份代码）
-- `tools/oracle.py`：独立解析基准（只用标准库）
+- `tools/oracle.py`：独立解析基准（只用标准库），`--cases` 给出对拍用例
+- `tools/volume_check.mjs`：把 oracle 的解析体积和 `cmd/main --stats` 的实测值逐组比阈值
 - `tools/wasm_check.mjs`：在 Node 里实例化同一份 wasm 跑验收
 - `tools/scene_check.mjs`：在 Node 里校验交互 demo 的 wasm 接口（建网格/读坐标/读指标）
 - `tools/serve.mjs`：本地静态服务，`node tools/serve.mjs` → http://127.0.0.1:8000/
@@ -56,7 +57,7 @@ import {
 ## 快速开始
 
 ```bash
-moon test                 # 41 个测试（native / js / wasm-gc 都要跑）
+moon test                 # 41 个 test 块 / 216 个用例（native / js / wasm-gc 都要跑）
 moon run examples/demo    # 盒减球，打印体积/面积/拓扑
 moon run examples/bench --release   # 网格化耗时基线
 moon check --deny-warn
@@ -68,7 +69,7 @@ node tools/serve.mjs      # 打开 http://127.0.0.1:8000/
 node tools/wasm_check.mjs # 不开浏览器，在 Node 里跑同一份 wasm 的验收项
 node tools/scene_check.mjs # 在 Node 里跑 demo 用到的场景接口
 
-# 一次跑完全部验收项（check/fmt/三后端测试/package/demo/bench/web/oracle）
+# 一次跑完全部验收项（check/fmt/三后端测试/package/demo/bench/web/体积对拍）
 node tools/acceptance.mjs
 ```
 
@@ -77,7 +78,7 @@ node tools/acceptance.mjs
 拖拽旋转、滚轮缩放、双击复位。分辨率滑杆控制的是请求值，指标区显示的是
 **实际**格点数（超过 `MAX_GRID_SLOTS` 会被自动收窄，见下）。
 
-`examples/demo` 的输出（盒减球，48 分辨率）：
+`examples/demo` 的输出（40³ 盒减球 r=12，`res = 64`）：
 
 ```
 triangles:  126484
@@ -108,19 +109,19 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 
 | 用例 | 三角形 | 实际格点 | wasm-gc | js |
 | --- | --- | --- | --- | --- |
-| 球 r=10，请求 32 | 26280 | 32³ | 13.6 ms | 33.9 ms |
-| 球 r=10，请求 64 | 104688 | 64³ | 64.9 ms | 161.9 ms |
-| 立方体 40³ 挖球 r=24，请求 48 | 107280 | 48³ | 84.7 ms | 206.0 ms |
-| 环面 R=8 r=3，请求 48 | 36172 | 48×48×15 | 19.3 ms | 40.3 ms |
-| 球 r=25，请求 128 | 443736 | 128³ | 391.8 ms | 1158 ms |
-| 球 r=25，请求 256 | 1135968 | **205³**（被收窄） | 1713.8 ms | 4092 ms |
+| 球 r=10，请求 32 | 26280 | 32³ | 13.9 ms | 35.2 ms |
+| 球 r=10，请求 64 | 104688 | 64³ | 68.3 ms | 175.0 ms |
+| 立方体 40³ 挖球 r=24，请求 48 | 107280 | 48³ | 90.7 ms | 233.5 ms |
+| 环面 R=8 r=3，请求 48 | 36172 | 48×48×15 | 20.6 ms | 45.3 ms |
+| 球 r=25，请求 128 | 443736 | 128³ | 404.5 ms | 981.1 ms |
+| 球 r=25，请求 256 | 1135968 | **205³**（被收窄） | 1419.9 ms | 3270.0 ms |
 
 后两行用 `moon run examples/bench --release -- big` 才跑（默认不跑，js 后端
 那两档要几秒，塞进 CI 会把 bench 这条 step 拖成分钟级）。
 
 两点说明：
 
-- **wasm-gc 比 js 后端快 2.1–3.0 倍**，这是同一份 MoonBit 源码换后端的结果，
+- **wasm-gc 比 js 后端快 2.2–2.6 倍**，这是同一份 MoonBit 源码换后端的结果，
   不是两份实现——wasm-gc 直接吃 `f64` 运算，js 后端还要过一层 BigInt/boxing 的
   边界检查。
 - **native 数字本地没有**：这台 Windows 机器没装 MSVC Build Tools，native 后端
@@ -134,7 +135,7 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 
 | 判据 | 测试 |
 | --- | --- |
-| 4 个原语在 1000 个随机点上与解析距离误差 < 1e-12 | `sdf_test.mbt` |
+| 球/盒各 1000 个随机点、圆柱 / 平面 / 圆台 / 胶囊的解析距离误差 < 1e-12 | `sdf_test.mbt` |
 | 布尔与 `min` / `max` / 取负逐点一致 | `sdf_test.mbt` |
 | 球体积误差 < 0.5%（128 分辨率）、盒 < 1%（40 分辨率） | `mesh_test.mbt` |
 | 环面亏格 = 1、欧拉示性数 = 0 | `mesh_test.mbt` |
@@ -151,10 +152,11 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | 二进制 STL 往返后三角数/顶点数/欧拉示性数不变、体积相对误差 < 1e-6 | `export_test.mbt` |
 | 截断的二进制 STL 返回 `None` 而不是越界 | `export_test.mbt` |
 | wasm 验收壳 4/4 通过（Node 与浏览器同一份 wasm） | `tools/wasm_check.mjs` |
-| 全部验收项一条命令跑完（check/fmt/三后端测试/package/demo/web/oracle） | `tools/acceptance.mjs` |
+| 全部验收项一条命令跑完（check/fmt/三后端测试/package/demo/web/体积对拍） | `tools/acceptance.mjs` |
 
-`tools/oracle.py` 用 Python 标准库手算同样的解析值，CI 里单独跑一遍，
-避免「期望值是从被测实现抄来的」。
+`tools/oracle.py` 用 Python 标准库手算解析值，`tools/volume_check.mjs` 把它和
+`cmd/main --stats` 的实测体积逐组比阈值——只跑 oracle.py 没意义（它打印完就
+exit 0），所以 CI 里跑的是后者，超差直接红。
 
 ## 设计要点
 
