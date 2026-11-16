@@ -57,7 +57,7 @@ import {
 ## 快速开始
 
 ```bash
-moon test                 # 41 个 test 块 / 216 个用例（native / js / wasm-gc 都要跑）
+moon test                 # 42 个 test 块 / 217 个用例（native / js / wasm-gc 都要跑）
 moon run examples/demo    # 盒减球，打印体积/面积/拓扑
 moon run examples/bench --release   # 网格化耗时基线
 moon check --deny-warn
@@ -135,7 +135,7 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 
 | 判据 | 测试 |
 | --- | --- |
-| 球/盒各 1000 个随机点、圆柱 / 平面 / 圆台 / 胶囊的解析距离误差 < 1e-12 | `sdf_test.mbt` |
+| 球/盒各 1000 个随机点、圆柱 / 平面 / 圆台 / 胶囊的解析距离误差 < 1e-12，环面按参数化构造点对拍 | `sdf_test.mbt` |
 | 布尔与 `min` / `max` / 取负逐点一致 | `sdf_test.mbt` |
 | 球体积误差 < 0.5%（128 分辨率）、盒 < 1%（40 分辨率） | `mesh_test.mbt` |
 | 环面亏格 = 1、欧拉示性数 = 0 | `mesh_test.mbt` |

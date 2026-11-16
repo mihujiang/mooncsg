@@ -292,3 +292,45 @@ test "cone and capsule bounds cover the solid" {
     None => fail("capsule must have bounds")
   }
 }
+
+///|
+test "torus matches analytic distance on parametric construction" {
+  // 环面：母线半径 R=8、管半径 r=3。参数点
+  //   P(θ, φ) = ((R + r cosφ) cosθ, (R + r cosφ) sinθ, r sinφ)
+  // 的单位法向是 n = (cosφ cosθ, cosφ sinθ, sinφ)，所以 P + t·n 到环面的
+  // 距离恒等于 t（带符号）。这条构造路径完全不经过被测的距离公式，只是
+  // 借用了环面的几何定义。单位圆上的 (cos, sin) 用有理参数化取，不引入
+  // 三角函数：u ∈ [-1, 1] 给出半圆，再随机翻一个符号补上另外半圈。
+  let torus = @mooncsg.Sdf::torus(8.0, 3.0)
+  let mut state = 20261116UL
+  let mut i = 0
+  let mut max_err = 0.0
+  while i < 500 {
+    state = next_state(state)
+    let u1 = unit(state) * 2.0 - 1.0
+    state = next_state(state)
+    let u2 = unit(state) * 2.0 - 1.0
+    state = next_state(state)
+    let sgn1 = if unit(state) < 0.5 { 1.0 } else { -1.0 }
+    state = next_state(state)
+    let sgn2 = if unit(state) < 0.5 { 1.0 } else { -1.0 }
+    let ct = (1.0 - u1 * u1) / (1.0 + u1 * u1)
+    let st = sgn1 * 2.0 * u1 / (1.0 + u1 * u1)
+    let cf = (1.0 - u2 * u2) / (1.0 + u2 * u2)
+    let sf = sgn2 * 2.0 * u2 / (1.0 + u2 * u2)
+    state = next_state(state)
+    let t = (unit(state) - 0.5) * 2.0
+    let ring = 8.0 + 3.0 * cf
+    let p = @mooncsg.Vec3::new(
+      ring * ct + t * cf * ct,
+      ring * st + t * cf * st,
+      3.0 * sf + t * sf,
+    )
+    let err = (torus.eval(p) - t).abs()
+    if err > max_err {
+      max_err = err
+    }
+    i = i + 1
+  }
+  assert_true(max_err < 1.0e-12)
+}

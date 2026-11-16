@@ -40,9 +40,9 @@ PASS  volume check   2386 ms
 
 毫秒列随机器负载浮动，判定只看 PASS / SKIP 两列。
 
-`test wasm-gc` 内部是 `Total tests: 216, passed: 216, failed: 0.`——源码里
-是 41 个 `test` 块，MoonBit 把块内每个 `assert_*` / `inspect` 记成一个用例，
-所以「41 块 / 216 用例」是同一件事的两种数法。
+`test wasm-gc` 内部是 `Total tests: 217, passed: 217, failed: 0.`——源码里
+是 42 个 `test` 块，MoonBit 把块内每个 `assert_*` / `inspect` 记成一个用例，
+所以「42 块 / 217 用例」是同一件事的两种数法。
 
 ## 精度：实测 vs 解析
 

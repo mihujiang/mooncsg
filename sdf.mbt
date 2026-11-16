@@ -75,6 +75,12 @@ pub fn Sdf::capsule(radius : Double, half_height : Double) -> Sdf {
 }
 
 ///|
+/// 环面：`big` 是母线（环心到管心）半径，`small` 是管半径。
+pub fn Sdf::torus(big : Double, small : Double) -> Sdf {
+  Torus(Vec3::zero(), big, small)
+}
+
+///|
 pub fn Sdf::at(self : Sdf, center : Vec3) -> Sdf {
   Translate(self, center)
 }
