@@ -121,7 +121,9 @@ test "binary stl round trip keeps a concave solid closed" {
 
 ///|
 test "truncated binary stl is rejected" {
-  let short = Bytes::new(10)
+  // 新工具链把 `Bytes::new(len)` 判为 deprecated（0020），要求显式给初值。
+  // 用 10 个 0 字节，语义不变：仍然短于 84 字节的二进制 STL 头。
+  let short = Bytes::make(10, b'\x00')
   match @mooncsg.Mesh::from_stl_binary(short) {
     Some(_) => assert_true(false)
     None => assert_true(true)
