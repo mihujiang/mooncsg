@@ -60,7 +60,7 @@ import {
 ## 快速开始
 
 ```bash
-moon test                 # 51 个 test 块 / 226 个用例（native / js / wasm-gc 都要跑）
+moon test                 # 56 个 test 块，wasm-gc / js / native 三后端都要跑
 moon run examples/demo    # 盒减球，打印体积/面积/拓扑
 moon run examples/bench --release   # 网格化耗时基线
 moon check --deny-warn
@@ -155,7 +155,9 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | **后置自检**：网格生成后 `open_edges() == 0` | `NotClosed(开口边数)` |
 
 通过检查的输出保证：每条无向边恰好被 2 个三角形共享（`is_watertight()`）、
-`open_edges() == 0`、体积为正、朝向朝外。
+`open_edges() == 0`、体积为正、朝向朝外。更严的一层是 `is_manifold()`
+（每条边 2 面 **且** 每个顶点的星形是一个环），它蕴含 `is_watertight()`
+但**不在** `mesh_checked` 的承诺范围内，需要时自己调。
 
 这个结论不只靠论证：`mesh_checked` 生成网格后会再跑一次**后置自检**
 （`open_edges() == 0`），不满足就返回 `NotClosed(边数)`。代价是多一次
@@ -204,7 +206,12 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 - **自交实体**（环面管半径 ≥ 母线半径、`subtract` 挖成非流形）：输出闭合，
   但不是合法实体，切片器会拒绝。
 - **多壳**：`is_watertight` 对多个不相交壳仍为真（每条边 2 面），但
-  `genus()` 返回 `-1` 表示「单壳亏格不可用」。
+  `genus()` 返回 `-1` 表示「单壳亏格不可用」。多壳本身仍是流形，
+  `is_manifold()` 为真——它拒的是两瓣只在**一个顶点**相触（星形分成两个环）。
+- **非流形顶点**：两瓣实体共用一个顶点（手搓网格、或 STL 导入按坐标焊接后把
+  相切的两瓣焊到同一点）时，`is_watertight()` 仍为真，`is_manifold()` 为假。
+  本库的 `union` 不会产生这种网格（两球外切取并是两块独立的壳），所以
+  `mesh_checked` 不拦它；从外部导入的网格要自己查。
 
 ## 验收口径
 
@@ -222,6 +229,8 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | 相切球、零厚度板、空交集、贴面格点、退化包围盒、超低分辨率都不崩 | `mesh_test.mbt` |
 | 等值面正好落在格点上时仍水密、体积误差 < 1% | `mesh_test.mbt` |
 | 每条无向边恰好 2 个面（水密） | `mesh_test.mbt` |
+| 四面体闭合流形为真；两个四面体共用一个顶点时 `is_watertight` 真但 `is_manifold` 假 | `mesh_test.mbt` |
+| 一条边挂 3 个面、去掉一个面的开口网格、空网格的 `is_manifold` 结果 | `mesh_test.mbt` |
 | `mesh_checked` 对相切 / 裁剪 / 空域 / 退化域 / 非有限场值分别返回对应错误 | `marching_test.mbt` |
 | 60 个随机实体在 `bounds().expand(0.5)` 下全部闭合、`open_edges == 0` | `marching_test.mbt` |
 | 两球外切后的并集仍闭合（体积误差 0.8 %），与「相切采样域必须拒绝」并列 | `marching_test.mbt` |

@@ -3,7 +3,7 @@
 
 name = "weopqrst/mooncsg"
 
-version = "0.1.7"
+version = "0.1.8"
 
 repository = "https://github.com/mihujiang/mooncsg"
 

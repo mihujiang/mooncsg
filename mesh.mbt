@@ -192,6 +192,204 @@ pub fn Mesh::open_edges(self : Mesh) -> Int32 {
 }
 
 ///|
+fn uf_find(parent : Array[Int32], x : Int32) -> Int32 {
+  let mut r = x
+  while parent[r] != r {
+    parent[r] = parent[parent[r]]
+    r = parent[r]
+  }
+  r
+}
+
+///|
+/// 按秩合并（这里只按「第一次出现」定根就够了）：合并成功才给顶点 `v`
+/// 记一次「星形被连起来」。
+fn uf_union(
+  parent : Array[Int32],
+  merges : Array[Int32],
+  a : Int32,
+  b : Int32,
+  v : Int32,
+) -> Unit {
+  let ra = uf_find(parent, a)
+  let rb = uf_find(parent, b)
+  if ra != rb {
+    parent[ra] = rb
+    merges[v] = merges[v] + 1
+  }
+}
+
+///|
+/// 面 `f` 中顶点 `v` 的「角」编号 `3 * f + k`。调用者保证 `v` 是该面的顶点。
+fn corner_of(indices : Array[Int32], f : Int32, v : Int32) -> Int32 {
+  let b = f * 3
+  if indices[b] == v {
+    b
+  } else if indices[b + 1] == v {
+    b + 1
+  } else {
+    b + 2
+  }
+}
+
+///|
+/// 无向边编码成 `min * V + max`，与 `edge_keys()` 同一套键。
+fn edge_key(a : Int32, b : Int32, nv : Int64) -> Int64 {
+  if a < b {
+    a.to_int64() * nv + b.to_int64()
+  } else {
+    b.to_int64() * nv + a.to_int64()
+  }
+}
+
+///|
+/// 处理一条边：第一次见到时记下所属面并累加两端度数；第二次见到时把两个面
+/// 在各自端点的星形里连起来（两条边在同一端点处相邻）；第三次见到说明这条边
+/// 被 3 个以上面共享，直接判否。
+fn link_edge(
+  parent : Array[Int32],
+  merges : Array[Int32],
+  deg : Array[Int32],
+  indices : Array[Int32],
+  first : @hashmap.HashMap[Int64, Int32],
+  key : Int64,
+  t : Int32,
+  u : Int32,
+  w : Int32,
+) -> Bool {
+  match first.get(key) {
+    Some(g) =>
+      if g < 0 {
+        false
+      } else {
+        // 同一端点的两个角用边 `(v, w)` 或 `(v, u)` 相连；并查集只在同顶点的
+        // 角之间合并，所以 `parent` 的连通块天然按顶点分组。
+        uf_union(
+          parent,
+          merges,
+          corner_of(indices, g, u),
+          corner_of(indices, t, u),
+          u,
+        )
+        uf_union(
+          parent,
+          merges,
+          corner_of(indices, g, w),
+          corner_of(indices, t, w),
+          w,
+        )
+        first.set(key, -(g + 1))
+        true
+      }
+    None => {
+      first.set(key, t)
+      deg[u] = deg[u] + 1
+      deg[w] = deg[w] + 1
+      true
+    }
+  }
+}
+
+///|
+/// 闭合 2-流形：每条无向边恰好 2 个面，且每个顶点的星形是**一个**环。
+///
+/// 只用 `faces(v) == deg(v)` 不够。两瓣实体只在一个顶点相触时（两个四面体共用
+/// 一个顶点、STL 导入按坐标焊接后把相切的两瓣焊到同一点），那个顶点的星形是
+/// 两个环，各环的 `faces` 与 `deg` 仍然相等，度数比下来照样通过。要看星形是
+/// 一个环还是两个环，只能真去连：这里把每个顶点的角（面 + 顶点）用并查集按
+/// 「共享一条过该顶点的边」连起来，连通块数 = 面数 - 成功合并次数，闭合流形
+/// 点应恰好剩下 1 个块。
+///
+/// 边被 3 个以上面共享时直接返回 false，所以这个函数**蕴含** `is_watertight()`；
+/// 反过来不成立（两瓣在一点相触的网格是水密的，但不是流形）。孤立顶点（不参与
+/// 任何面）不算缺陷，跳过。
+///
+/// 代价：一次哈希建表 + 一次并查集（`α` 近似常数）；`3F` 个角各存一份父指针，
+/// 100 万三角量级要多出几十 MB 临时内存、秒级时间。比 `is_watertight()` 贵一档。
+pub fn Mesh::is_manifold(self : Mesh) -> Bool {
+  let f_count = self.triangle_count()
+  if f_count == 0 {
+    return true
+  }
+  let n = self.vertex_count()
+  if self.indices.length() != f_count * 3 {
+    return false
+  }
+  let nc = f_count * 3
+  let nv = n.to_int64()
+  let parent : Array[Int32] = Array::make(nc, 0)
+  let mut c = 0
+  while c < nc {
+    parent[c] = c
+    c = c + 1
+  }
+  let merges : Array[Int32] = Array::make(n, 0)
+  let deg : Array[Int32] = Array::make(n, 0)
+  let faces : Array[Int32] = Array::make(n, 0)
+  let first : @hashmap.HashMap[Int64, Int32] = @hashmap.HashMap([], capacity=nc)
+  let mut t = 0
+  while t < f_count {
+    let ia = self.indices[t * 3]
+    let ib = self.indices[t * 3 + 1]
+    let ic = self.indices[t * 3 + 2]
+    faces[ia] = faces[ia] + 1
+    faces[ib] = faces[ib] + 1
+    faces[ic] = faces[ic] + 1
+    if !link_edge(
+        parent,
+        merges,
+        deg,
+        self.indices,
+        first,
+        edge_key(ia, ib, nv),
+        t,
+        ia,
+        ib,
+      ) {
+      return false
+    }
+    if !link_edge(
+        parent,
+        merges,
+        deg,
+        self.indices,
+        first,
+        edge_key(ib, ic, nv),
+        t,
+        ib,
+        ic,
+      ) {
+      return false
+    }
+    if !link_edge(
+        parent,
+        merges,
+        deg,
+        self.indices,
+        first,
+        edge_key(ic, ia, nv),
+        t,
+        ic,
+        ia,
+      ) {
+      return false
+    }
+    t = t + 1
+  }
+  let mut v = 0
+  while v < n {
+    if faces[v] > 0 {
+      // 星形的连通块数 = 面数 - 成功合并次数。闭合流形点恰好为 1。
+      if deg[v] != faces[v] || faces[v] - merges[v] != 1 {
+        return false
+      }
+    }
+    v = v + 1
+  }
+  true
+}
+
+///|
 /// 唯一边数。
 pub fn Mesh::edge_count(self : Mesh) -> Int32 {
   let keys = self.edge_keys()

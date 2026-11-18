@@ -1,6 +1,6 @@
 # 验收记录
 
-本文件记录 **0.1.3** 这一版实际跑出来的数字。所有数值都来自下面这条命令，
+本文件记录 **0.1.8** 这一版实际跑出来的数字。所有数值都来自下面这条命令，
 不是估算，也不是设计目标。
 
 ## 环境
@@ -22,28 +22,28 @@ node tools/acceptance.mjs
 实际输出（2026-11-18）：
 
 ```
-PASS  check          356 ms
-PASS  fmt            99 ms
+PASS  check          836 ms
+PASS  fmt            101 ms
 SKIP  test native    本机无 native 工具链
-PASS  test wasm-gc   6849 ms
-PASS  test js        11564 ms
-PASS  package        1402 ms
-PASS  demo           1134 ms
-PASS  bench          1270 ms
-PASS  build web      359 ms
-PASS  wasm selftest  387 ms
-PASS  wasm scene     1207 ms
-PASS  guard check    1806 ms
-PASS  volume check   2969 ms
+PASS  test wasm-gc   7295 ms
+PASS  test js        11973 ms
+PASS  package        968 ms
+PASS  demo           1262 ms
+PASS  bench          1210 ms
+PASS  build web      362 ms
+PASS  wasm selftest  437 ms
+PASS  wasm scene     1434 ms
+PASS  guard check    1815 ms
+PASS  volume check   3185 ms
 
 没有失败项（共 13 项）
 ```
 
 毫秒列随机器负载浮动，判定只看 PASS / SKIP 两列。
 
-`test wasm-gc` 内部是 `Total tests: 226, passed: 226, failed: 0.`——源码里
-是 51 个 `test` 块，MoonBit 把块内每个 `assert_*` / `inspect` 记成一个用例，
-所以「51 块 / 226 用例」是同一件事的两种数法。
+`test wasm-gc` / `test js` 内部都是 `Total tests: 56, passed: 56, failed: 0.`
+——源码里 56 个 `test` 块，当前工具链按块计数（一块一个用例），块内逐条
+`assert_*` 断言，任一条红整块就红。
 
 ## 可打印保证：输入条件与拒绝语义
 
@@ -124,13 +124,20 @@ CLI 默认走它，错误以非零退出码表达，不产出文件。
 
 ## 拓扑：每个形状都必须是闭合流形
 
-| 形状 | 水密 | χ | 亏格 |
-| --- | --- | --- | --- |
-| 球 / 立方体 / 圆台 / 胶囊 / 减球 | true | 2 | 0 |
-| 环面 | true | 0 | 1 |
+| 形状 | 水密 | 流形 | χ | 亏格 |
+| --- | --- | --- | --- | --- |
+| 球 / 立方体 / 圆台 / 胶囊 / 减球 | true | true | 2 | 0 |
+| 环面 | true | true | 0 | 1 |
 
 判定方式不是「看着像」：`is_watertight()` 检查每条边恰好被两个三角共用且
-方向相反，`euler()` 是 `V − E + F`，亏格由 `(2 − χ) / 2` 得出。
+方向相反，`is_manifold()` 再查每个顶点的星形是一个环（比 `is_watertight()`
+严，能抓出「两瓣只在一个顶点相触」），`euler()` 是 `V − E + F`，亏格由
+`(2 − χ) / 2` 得出。
+
+`is_manifold()` 不是 `mesh_checked` 的承诺：本库 `union` 两球外切时输出的
+是两块独立壳（χ = 4），不会产生共用顶点的 pinch；这类网格只从外部导入
+（STL 按坐标焊接）或手搓数据里来，`mesh_test.mbt` 用两个共顶点的四面体钉住
+这个判据（水密为真、流形为假）。
 
 ## 浏览器侧
 

@@ -18,6 +18,7 @@ test "sphere meshes watertight with small volume error" {
   let m = @mooncsg.mesh(s, sphere_bounds(r), @mooncsg.MeshOptions::new(128))
   assert_true(!m.is_empty())
   assert_true(m.is_watertight())
+  assert_true(m.is_manifold())
   assert_true(m.volume() > 0.0)
   let want = 4.0 / 3.0 * 3.141592653589793 * r * r * r
   assert_true(rel_err(m.volume(), want) < 0.005)
@@ -34,6 +35,7 @@ test "box volume and topology" {
   )
   let m = @mooncsg.mesh(s, b, @mooncsg.MeshOptions::new(40))
   assert_true(m.is_watertight())
+  assert_true(m.is_manifold())
   let want = 40.0 * 30.0 * 20.0
   assert_true(rel_err(m.volume(), want) < 0.01)
   assert_eq(m.genus(), 0)
@@ -51,6 +53,7 @@ test "torus has genus one" {
   ).expand(0.5)
   let m = @mooncsg.mesh(s, b, @mooncsg.MeshOptions::new(48))
   assert_true(m.is_watertight())
+  assert_true(m.is_manifold())
   let want = 2.0 * 3.141592653589793 * 3.141592653589793 * big * small * small
   assert_true(rel_err(m.volume(), want) < 0.02)
   assert_eq(m.euler(), 0)
@@ -128,6 +131,7 @@ test "two through holes give genus two" {
   ).expand(0.5)
   let m = @mooncsg.mesh(s, b, @mooncsg.MeshOptions::new(48))
   assert_true(m.is_watertight())
+  assert_true(m.is_manifold())
   // 两个圆柱各自贯穿 z 方向：挖掉 2 * π r² * 20
   let want = 24000.0 - 2.0 * 3.141592653589793 * 5.0 * 5.0 * 20.0
   assert_true(rel_err(m.volume(), want) < 0.005)
@@ -291,7 +295,93 @@ test "two disjoint shells make genus undecidable" {
   ).expand(0.5)
   let m = @mooncsg.mesh(s, b, @mooncsg.MeshOptions::new(64))
   assert_true(m.is_watertight())
+  assert_true(m.is_manifold())
   // 两个闭合壳：χ = 2 + 2 = 4，(2 - χ) / 2 = -1 不是亏格，所以给 -1。
   assert_eq(m.euler(), 4)
   assert_eq(m.genus(), -1)
+}
+
+///|
+/// 手搓网格：两个四面体只共用 0 号顶点（焊接后是同一个点）。
+fn two_tetrahedra_at_a_point() -> @mooncsg.Mesh {
+  let positions : Array[@mooncsg.Vec3] = [
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::new(1.0, 1.0, 1.0),
+    @mooncsg.Vec3::new(1.0, -1.0, -1.0),
+    @mooncsg.Vec3::new(-1.0, 1.0, -1.0),
+    @mooncsg.Vec3::new(3.0, 0.0, 0.0),
+    @mooncsg.Vec3::new(4.0, 1.0, 1.0),
+    @mooncsg.Vec3::new(4.0, -1.0, -1.0),
+    @mooncsg.Vec3::new(2.0, 1.0, -1.0),
+  ]
+  let indices : Array[Int32] = [
+    0, 1, 2, 0, 2, 3, 0, 3, 1, 1, 3, 2, 0, 5, 6, 0, 6, 7, 0, 7, 5, 5, 7, 6,
+  ]
+  @mooncsg.Mesh::new(positions, indices)
+}
+
+///|
+test "single tetrahedron is a closed manifold" {
+  let positions : Array[@mooncsg.Vec3] = [
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::new(1.0, 1.0, 1.0),
+    @mooncsg.Vec3::new(1.0, -1.0, -1.0),
+    @mooncsg.Vec3::new(-1.0, 1.0, -1.0),
+  ]
+  let indices : Array[Int32] = [0, 1, 2, 0, 2, 3, 0, 3, 1, 1, 3, 2]
+  let m = @mooncsg.Mesh::new(positions, indices)
+  assert_eq(m.triangle_count(), 4)
+  assert_true(m.is_watertight())
+  assert_true(m.is_manifold())
+  assert_eq(m.euler(), 2)
+  assert_eq(m.genus(), 0)
+}
+
+///|
+test "two tetrahedra glued at one vertex are watertight but not manifold" {
+  // 关键：每个顶点的 faces 与 deg 仍然相等（两瓣各自是一个环），
+  // 只比度数会漏掉，必须看星形是不是「一个」环。
+  let m = two_tetrahedra_at_a_point()
+  assert_true(m.is_watertight())
+  assert_true(!m.is_manifold())
+}
+
+///|
+test "three faces on one edge are not manifold" {
+  // 四面体 + 挂在新顶点上的一个面，与底边 (0,1) 共享边：该边 3 个面。
+  let positions : Array[@mooncsg.Vec3] = [
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::new(1.0, 1.0, 1.0),
+    @mooncsg.Vec3::new(1.0, -1.0, -1.0),
+    @mooncsg.Vec3::new(-1.0, 1.0, -1.0),
+    @mooncsg.Vec3::new(0.0, 0.0, 2.0),
+  ]
+  let indices : Array[Int32] = [0, 1, 2, 0, 2, 3, 0, 3, 1, 1, 3, 2, 0, 1, 4]
+  let m = @mooncsg.Mesh::new(positions, indices)
+  assert_true(!m.is_watertight())
+  assert_true(!m.is_manifold())
+}
+
+///|
+test "open surface is not manifold" {
+  // 四面体去掉一个面：出现边界，不能再算闭合流形。
+  let positions : Array[@mooncsg.Vec3] = [
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::new(1.0, 1.0, 1.0),
+    @mooncsg.Vec3::new(1.0, -1.0, -1.0),
+    @mooncsg.Vec3::new(-1.0, 1.0, -1.0),
+  ]
+  let indices : Array[Int32] = [0, 1, 2, 0, 2, 3, 0, 3, 1]
+  let m = @mooncsg.Mesh::new(positions, indices)
+  assert_true(!m.is_watertight())
+  assert_true(!m.is_manifold())
+}
+
+///|
+test "empty mesh and mesh without triangles are manifold" {
+  assert_true(@mooncsg.Mesh::empty().is_manifold())
+  // 只有顶点、没有面：没有拓扑可违反，孤立顶点不算缺陷。
+  let positions : Array[@mooncsg.Vec3] = [@mooncsg.Vec3::zero()]
+  let m = @mooncsg.Mesh::new(positions, [])
+  assert_true(m.is_manifold())
 }
