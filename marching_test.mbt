@@ -162,6 +162,33 @@ test "degenerate sampling box is rejected" {
 }
 
 ///|
+/// 相切**实体**与相切**采样域**是两件事：两个半径 5 的球外切（球心距 10）
+/// 时，接触点是梯度不连续的奇异点，那一带的三角形会非常细，但拓扑仍然闭合，
+/// 所以照样通过检查。体积比解析值 `2 × 4/3π·125 = 1047.2` 小约 0.8 %，
+/// 误差来自接触点被采样平滑掉——这是精度问题，不是拓扑问题。
+test "tangent spheres union stays closed" {
+  let a = @mooncsg.Sdf::sphere(5.0)
+  let b = @mooncsg.Sdf::sphere(5.0).at(@mooncsg.Vec3::new(10.0, 0.0, 0.0))
+  let sdf = a.union(b)
+  let bounds = match sdf.bounds() {
+    Some(x) => x.expand(0.5)
+    None => {
+      fail("并集必须有包围盒")
+      @mooncsg.Aabb::new(@mooncsg.Vec3::zero(), @mooncsg.Vec3::zero())
+    }
+  }
+  match @mooncsg.mesh_checked(sdf, bounds, @mooncsg.MeshOptions::new(24)) {
+    Ok(m) => {
+      assert_true(m.is_watertight())
+      assert_eq(m.open_edges(), 0)
+      let want = 2.0 * 4.0 / 3.0 * 3.141592653589793 * 125.0
+      assert_true((m.volume() - want).abs() / want < 0.02)
+    }
+    Err(e) => fail(e.describe())
+  }
+}
+
+///|
 /// 「自动采样的默认做法」必须真的给出保证：60 个随机实体，包围盒取
 /// `bounds().expand(0.5)`，全部通过检查且闭合。这条测试是 `mesh_checked`
 /// 承诺的实证，不是文档里的形容词。

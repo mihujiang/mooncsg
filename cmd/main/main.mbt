@@ -173,14 +173,16 @@ fn parse_csv(v : String) -> Array[Double]? {
 /// 先打人话，再 `abort`——这个工具链没有 `@env.exit`，而「拒绝」必须体现
 /// 在退出码上，否则脚本会把一次失败的网格化当成成功。
 fn reject(msg : String) -> Unit {
+  // 这个工具链的 eprintln 与 stdout 同流，所以拒绝信息也会被 `> part.stl`
+  // 一起重定向进文件——提醒以退出码为准，别把错误文本当成模型。
   eprintln("错误：\{msg}")
   eprintln(
-    "拒绝输出：这类输入得不到闭合网格，切片软件会当成漏体。半空间请用 --bounds 给出有界域；",
+    "拒绝输出：这类输入得不到闭合网格。半空间用 --bounds 给出有界域；",
   )
   eprintln(
-    "确实只想要裁剪网格时加 --clip，那时 watertight 为 false，open_edges 给出开口边数。",
+    "需要裁剪网格时显式加 --clip。重定向产物请以本进程退出码（非 0）为准。",
   )
-  abort(msg)
+  abort("")
 }
 
 ///|

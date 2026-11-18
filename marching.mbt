@@ -405,6 +405,10 @@ pub(all) enum MeshError {
   SurfaceClipped(Vec3, Double)
   /// 采样域里一个内部点都没有（`f > 0` 处处成立），出来是空网格。
   NoSurface
+  /// 前置条件都过了，但生成出来的网格仍有开口边。这是后置自检的兜底：
+  /// 说明「边界全正 ⇒ 闭合」的论证在某处不成立（例如场值有奇点）。
+  /// 附带开口边数，不做静默放行。
+  NotClosed(Int32)
 }
 
 ///|
@@ -419,6 +423,7 @@ pub fn MeshError::describe(self : MeshError) -> String {
     SurfaceClipped(p, f) =>
       "采样域被实体穿过：边界点 (\{p.x}, \{p.y}, \{p.z}) 的场值是 \{f}，网格会开口"
     NoSurface => "采样域内没有曲面（f > 0 处处成立）"
+    NotClosed(n) => "网格未闭合：\{n} 条边的相邻面数不是 2"
   }
 }
 
@@ -603,7 +608,16 @@ pub fn mesh_checked(
       if m.is_empty() {
         Err(NoSurface)
       } else {
-        Ok(m)
+        // 后置自检：前面四条只是「闭合」的充分性论证，这里把结论本身直接
+        // 验一遍。多花一次 O(F log F) 的边排序，换来「通过即闭合」不依赖
+        // 论证的正确性——两者不一致时落到 NotClosed，而不是放行一个开口
+        // 网格。相切、奇点、非流形之类的病态输入由这一层兜住。
+        let open = m.open_edges()
+        if open > 0 {
+          Err(NotClosed(open))
+        } else {
+          Ok(m)
+        }
       }
     }
   }

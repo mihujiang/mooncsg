@@ -41,9 +41,9 @@ PASS  volume check   2969 ms
 
 毫秒列随机器负载浮动，判定只看 PASS / SKIP 两列。
 
-`test wasm-gc` 内部是 `Total tests: 225, passed: 225, failed: 0.`——源码里
-是 50 个 `test` 块，MoonBit 把块内每个 `assert_*` / `inspect` 记成一个用例，
-所以「50 块 / 225 用例」是同一件事的两种数法。
+`test wasm-gc` 内部是 `Total tests: 226, passed: 226, failed: 0.`——源码里
+是 51 个 `test` 块，MoonBit 把块内每个 `assert_*` / `inspect` 记成一个用例，
+所以「51 块 / 226 用例」是同一件事的两种数法。
 
 ## 可打印保证：输入条件与拒绝语义
 
@@ -56,6 +56,7 @@ CLI 默认走它，错误以非零退出码表达，不产出文件。
 | 场值处处有限（无 NaN / Inf） | `NonFiniteField` |
 | 采样域 6 个面上的采样点全部 `f > 0` | `SurfaceClipped` |
 | 采样域内存在内部点 | `NoSurface` |
+| 后置自检：生成后 `open_edges() == 0` | `NotClosed(边数)` |
 
 `node tools/guard_check.mjs` 用真实 CLI 输入把这张表钉死（CI 第 13 项）：
 
@@ -86,8 +87,14 @@ CLI 默认走它，错误以非零退出码表达，不产出文件。
 `--clip` 是显式放弃保证的开关：输出仍是合法三角网格，但不闭合、不能直接
 切片，`watertight` 为 false，`open_edges` 给出开口边数。
 
-「相切」单列一条库层测试：球盒不加 `expand`，曲面正好落在 6 个面上，
-边界采样 `f == 0`，判据 `f <= 0` 含相等，所以直接拒绝（`marching_test.mbt`）。
+「相切」要分两种，结论相反：
+
+- **相切采样域**：球盒不加 `expand`，曲面正好落在 6 个面上，边界采样
+  `f == 0`，判据 `f <= 0` 含相等，所以直接拒绝（`marching_test.mbt`）。
+- **相切实体**：两个半径 5 的球外切（球心距 10）后取并，接触点是梯度不连续
+  的奇点，但拓扑仍闭合，`mesh_checked` 返回 Ok、`open_edges == 0`；体积
+  1039.1 比解析值 1047.2 小 0.8 %（接触点被采样平滑掉，属精度问题）。
+  这条也在 `marching_test.mbt` 里。
 
 ## 精度：实测 vs 解析
 
@@ -196,3 +203,7 @@ wasm-gc 上 13.9 ms → 1419.9 ms，三角形从 2.6 万到 114 万。js 后端�
 - 让 `mesh_checked` 直接返回 `assemble_mesh` 的结果、不做任何检查：
   `marching_test` 里四个拒绝用例全部失败，`guard_check` 的三个 exit 1
   场景会变成 exit 0，CI 直接红。
+- **双层防御实测**：只把前置的边界检查关掉（判据改成 `f < -1e300`），
+  被裁剪的那条命令仍然 exit 1，只是错误从「采样域被实体穿过」变成了
+  「网格未闭合：402 条边的相邻面数不是 2」——402 与 `--clip` 报出的
+  `open_edges` 是同一个数。说明后置自检能独立兜住前置检查的失效。

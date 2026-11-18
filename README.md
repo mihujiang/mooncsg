@@ -60,7 +60,7 @@ import {
 ## 快速开始
 
 ```bash
-moon test                 # 50 个 test 块 / 225 个用例（native / js / wasm-gc 都要跑）
+moon test                 # 51 个 test 块 / 226 个用例（native / js / wasm-gc 都要跑）
 moon run examples/demo    # 盒减球，打印体积/面积/拓扑
 moon run examples/bench --release   # 网格化耗时基线
 moon check --deny-warn
@@ -152,9 +152,17 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | 采样点场值处处有限（无 NaN / Inf） | `NonFiniteField(点)` |
 | 实体**严格位于**采样域内部：6 个面上的采样点全部 `f > 0` | `SurfaceClipped(点, 场值)` |
 | 采样域内确实存在内部点 | `NoSurface` |
+| **后置自检**：网格生成后 `open_edges() == 0` | `NotClosed(开口边数)` |
 
 通过检查的输出保证：每条无向边恰好被 2 个三角形共享（`is_watertight()`）、
 `open_edges() == 0`、体积为正、朝向朝外。
+
+这个结论不只靠论证：`mesh_checked` 生成网格后会再跑一次**后置自检**
+（`open_edges() == 0`），不满足就返回 `NotClosed(边数)`。代价是多一次
+`O(F log F)` 的边排序；收益是「前置条件 ⇒ 闭合」这条推理哪天真不成立时，
+只会得到错误，不会得到一块开口网格。两层是独立的——把前置的边界检查关掉，
+后置自检仍会以 `NotClosed` 拒绝（实测 402 条开口边，与 `--clip` 报出的数字
+一致）。
 
 **为什么第 3 条是充要条件、不是保守估计**：三角形只在相邻四面体之间按
 「格点索引对」配对焊接，曲面上的每个顶点都落在一条两端格点异号的边上。
@@ -172,6 +180,7 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | **半空间** `plane` | `bounds() == None` ⇒ 拒绝 `Unbounded`；CLI 要求用 `--bounds` 给出有界域 |
 | 半空间 + 有界域 | 域边界上必然出现 `f <= 0` ⇒ 拒绝 `SurfaceClipped`——半空间在有限域内闭不了 |
 | **实体与域面相切**（球心落在域面上） | 边界采样 `f == 0` ⇒ 拒绝（判据 `f <= 0` 含相等） |
+| **两个实体相切**（两球外切后取并） | 通过：接触点是梯度奇点，那一带三角形极细，体积比解析值小 0.8 %，但拓扑闭合 |
 | **采样域小于实体**（被裁剪） | 默认拒绝；显式要裁剪网格时用 `--clip`（或 `mesh_unchecked`），此时 `watertight=false`、`open_edges` 给出开口边数 |
 | 域与实体完全不重叠 | 拒绝 `NoSurface`，不把空网格当成功 |
 | 退化参数（`scale(0)`、NaN 半径） | 采样到 Inf/NaN ⇒ 拒绝 `NonFiniteField` |
@@ -215,6 +224,7 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | 每条无向边恰好 2 个面（水密） | `mesh_test.mbt` |
 | `mesh_checked` 对相切 / 裁剪 / 空域 / 退化域 / 非有限场值分别返回对应错误 | `marching_test.mbt` |
 | 60 个随机实体在 `bounds().expand(0.5)` 下全部闭合、`open_edges == 0` | `marching_test.mbt` |
+| 两球外切后的并集仍闭合（体积误差 0.8 %），与「相切采样域必须拒绝」并列 | `marching_test.mbt` |
 | 同输入两次网格化逐位相同 | `mesh_test.mbt` |
 | 网格指纹等于常量 7885752854646016839（js / wasm-gc 本地跑，native 在 CI 跑，三后端同值） | `mesh_test.mbt` |
 | 分辨率或朝向变化时指纹必然改变（指纹确实覆盖几何与拓扑） | `mesh_test.mbt` |
