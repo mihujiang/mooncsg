@@ -5,7 +5,8 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 
 目标是让「程序化生成一个能直接进切片软件的实体」这件事只依赖一份
 可读的 MoonBit 代码——几何在数学上闭合（水密、朝向一致、体积可对数），
-而不是「看起来像」。
+而不是「看起来像」。闭合不是无条件承诺：`mesh_checked` 先判定输入是否
+满足条件，不满足就拒绝，范围见下文「可打印保证的范围」。
 
 在线演示：<https://mihujiang.github.io/mooncsg/>　　实测数字：见 [`ACCEPTANCE.md`](ACCEPTANCE.md)
 
@@ -21,7 +22,8 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 - `vec.mbt`：`Vec3` / `Mat3` / `Aabb`
 - `sdf.mbt`：球、盒、半空间、圆柱、圆台、胶囊、环面；平移/旋转/缩放；
   并/交/差/平滑并；包围盒
-- `marching.mbt`：规则体素 + 6 四面体分解 + 边键焊接 + 梯度投影
+- `marching.mbt`：规则体素 + 6 四面体分解 + 边键焊接 + 梯度投影；
+  `mesh_checked` 的采样域前置检查与拒绝语义（`mesh` / `mesh_unchecked` 不检查）
 - `mesh.mbt`：散度体积、面积、水密判定、欧拉示性数 / 亏格（只对单个闭合壳
   有定义，多壳返回 `-1`）、FNV-1a 指纹
 - `export.mbt`：OBJ、ASCII STL、二进制 STL，以及二进制 STL 回读
@@ -30,6 +32,7 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 - `examples/bench`：网格化耗时基线（native / js / wasm-gc 同一份代码）
 - `tools/oracle.py`：独立解析基准（只用标准库），`--cases` 给出对拍用例
 - `tools/volume_check.mjs`：把 oracle 的解析体积和 `cmd/main --stats` 的实测值逐组比阈值
+- `tools/guard_check.mjs`：CLI 边界语义门禁（正常输入必须闭合，半空间 / 裁剪 / 空域必须被拒）
 - `tools/wasm_check.mjs`：在 Node 里实例化同一份 wasm 跑验收
 - `tools/scene_check.mjs`：在 Node 里校验交互 demo 的 wasm 接口（建网格/读坐标/读指标）
 - `tools/serve.mjs`：本地静态服务，`node tools/serve.mjs` → http://127.0.0.1:8000/
@@ -57,19 +60,28 @@ import {
 ## 快速开始
 
 ```bash
-moon test                 # 42 个 test 块 / 217 个用例（native / js / wasm-gc 都要跑）
+moon test                 # 50 个 test 块 / 225 个用例（native / js / wasm-gc 都要跑）
 moon run examples/demo    # 盒减球，打印体积/面积/拓扑
 moon run examples/bench --release   # 网格化耗时基线
 moon check --deny-warn
 moon fmt --check
+
+# 边界语义的两端：能保证的与必须拒绝的
+moon run cmd/main -- sphere 10 --res 32 > s.stl   # exit 0：闭合可切片
+moon run cmd/main -- plane 0 0 1 0 --stats        # exit 1：半空间没有有限包围盒
+moon run cmd/main -- sphere 10 --bounds -10.5,-10.5,-10.5,2,10.5,10.5 --stats
+                                                  # exit 1：采样域被实体穿出
+moon run cmd/main -- sphere 10 --bounds -10.5,-10.5,-10.5,2,10.5,10.5 --clip --stats
+                                                  # exit 0：明确声明 watertight=false
 
 # 交互 demo（调参 + canvas 投影）
 node tools/build_web.mjs  # 编译 wasm 并复制到 examples/web/
 node tools/serve.mjs      # 打开 http://127.0.0.1:8000/
 node tools/wasm_check.mjs # 不开浏览器，在 Node 里跑同一份 wasm 的验收项
 node tools/scene_check.mjs # 在 Node 里跑 demo 用到的场景接口
+node tools/guard_check.mjs # 边界语义门禁：正常输入闭合，半空间/裁剪/空域必须被拒
 
-# 一次跑完全部验收项（check/fmt/三后端测试/package/demo/bench/web/体积对拍）
+# 一次跑完全部验收项（13 项：check/fmt/三后端测试/package/demo/bench/web/边界语义/体积对拍）
 node tools/acceptance.mjs
 ```
 
@@ -129,6 +141,62 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
   ubuntu runner 上 `moon test --target native` 会跑，所以 native 的正确性有
   持续覆盖，只是没有本地耗时对照。本表不编 native 的数。
 
+## 可打印保证的范围
+
+「水密」不是形容词，而是**可判定的输入条件**加**可验证的输出性质**。
+`mesh_checked` 是唯一给出保证的入口，其余情况一律拒绝：
+
+| 前置条件（逐条检查） | 不满足时的处置 |
+| --- | --- |
+| 采样域各轴长度 > 0、坐标有限 | `DegenerateBounds` |
+| 采样点场值处处有限（无 NaN / Inf） | `NonFiniteField(点)` |
+| 实体**严格位于**采样域内部：6 个面上的采样点全部 `f > 0` | `SurfaceClipped(点, 场值)` |
+| 采样域内确实存在内部点 | `NoSurface` |
+
+通过检查的输出保证：每条无向边恰好被 2 个三角形共享（`is_watertight()`）、
+`open_edges() == 0`、体积为正、朝向朝外。
+
+**为什么第 3 条是充要条件、不是保守估计**：三角形只在相邻四面体之间按
+「格点索引对」配对焊接，曲面上的每个顶点都落在一条两端格点异号的边上。
+若某条边的两端都贴着采样域边界，曲面就是从边界穿出去的——那个顶点在域内
+找不到对侧三角形，边界处必然留开口。反过来，边界全正意味着曲面整块在
+内部，每个顶点都能在域内找到对侧三角形，于是「闭合」是构造保证，不是
+概率。
+
+### 具体到几类输入
+
+| 输入 | 输出 / 拒绝条件 |
+| --- | --- |
+| 球 / 盒 / 圆柱 / 圆台 / 胶囊 / 环面（有界原语） | 默认采样域 `bounds().expand(0.5)` ⇒ 通过，闭合 |
+| 原语的布尔组合（并 / 交 / 差 / 平滑并） | 同上；包围盒由运算各自收紧，平滑并额外外扩 `k/2` |
+| **半空间** `plane` | `bounds() == None` ⇒ 拒绝 `Unbounded`；CLI 要求用 `--bounds` 给出有界域 |
+| 半空间 + 有界域 | 域边界上必然出现 `f <= 0` ⇒ 拒绝 `SurfaceClipped`——半空间在有限域内闭不了 |
+| **实体与域面相切**（球心落在域面上） | 边界采样 `f == 0` ⇒ 拒绝（判据 `f <= 0` 含相等） |
+| **采样域小于实体**（被裁剪） | 默认拒绝；显式要裁剪网格时用 `--clip`（或 `mesh_unchecked`），此时 `watertight=false`、`open_edges` 给出开口边数 |
+| 域与实体完全不重叠 | 拒绝 `NoSurface`，不把空网格当成功 |
+| 退化参数（`scale(0)`、NaN 半径） | 采样到 Inf/NaN ⇒ 拒绝 `NonFiniteField` |
+
+实测（`node tools/guard_check.mjs`，CI 里的第 13 项门禁）：
+
+| 场景 | 退出码 | 关键输出 |
+| --- | --- | --- |
+| 球 r=10，自动采样域 | 0 | `watertight: true`、`open_edges: 0` |
+| 半空间，无域 | 1 | 没有有限包围盒，提示用 `--bounds` |
+| 半空间 + 有界域 | 1 | 采样域被实体穿过：边界点 `(-10,-10,-10)` 场值 `-10` |
+| 域小于实体（裁一半） | 1 | 采样域被实体穿过：场值 `-0.015` |
+| 同一输入加 `--clip` | 0 | `watertight: false`、`open_edges: 402` |
+| 域离实体很远 | 1 | 采样域内没有曲面 |
+
+### 明确不保证的
+
+- **薄壳**：壁厚小于 2 个体素时两侧可能落进同一格点，整片壳被漏掉——报
+  `NoSurface` 或体积明显偏小。加密 `--res`，或把壁厚做大。
+- **非精确 SDF**（`|∇f|` 明显偏离 1）：拓扑仍闭合，但体积与法线有偏差。
+- **自交实体**（环面管半径 ≥ 母线半径、`subtract` 挖成非流形）：输出闭合，
+  但不是合法实体，切片器会拒绝。
+- **多壳**：`is_watertight` 对多个不相交壳仍为真（每条边 2 面），但
+  `genus()` 返回 `-1` 表示「单壳亏格不可用」。
+
 ## 验收口径
 
 每条断言都能把当前代码判为失败，不是「跑通了就算」：
@@ -145,6 +213,8 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | 相切球、零厚度板、空交集、贴面格点、退化包围盒、超低分辨率都不崩 | `mesh_test.mbt` |
 | 等值面正好落在格点上时仍水密、体积误差 < 1% | `mesh_test.mbt` |
 | 每条无向边恰好 2 个面（水密） | `mesh_test.mbt` |
+| `mesh_checked` 对相切 / 裁剪 / 空域 / 退化域 / 非有限场值分别返回对应错误 | `marching_test.mbt` |
+| 60 个随机实体在 `bounds().expand(0.5)` 下全部闭合、`open_edges == 0` | `marching_test.mbt` |
 | 同输入两次网格化逐位相同 | `mesh_test.mbt` |
 | 网格指纹等于常量 7885752854646016839（js / wasm-gc 本地跑，native 在 CI 跑，三后端同值） | `mesh_test.mbt` |
 | 分辨率或朝向变化时指纹必然改变（指纹确实覆盖几何与拓扑） | `mesh_test.mbt` |
@@ -152,7 +222,8 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | 二进制 STL 往返后三角数/顶点数/欧拉示性数不变、体积相对误差 < 1e-6 | `export_test.mbt` |
 | 截断的二进制 STL 返回 `None` 而不是越界 | `export_test.mbt` |
 | wasm 验收壳 4/4 通过（Node 与浏览器同一份 wasm） | `tools/wasm_check.mjs` |
-| 全部验收项一条命令跑完（check/fmt/三后端测试/package/demo/web/体积对拍） | `tools/acceptance.mjs` |
+| CLI 边界语义：正常输入 exit 0 且闭合；半空间 / 裁剪 / 空域 exit ≠ 0；`--clip` 声明开口 | `tools/guard_check.mjs` |
+| 全部验收项一条命令跑完（13 项，含边界语义与体积对拍） | `tools/acceptance.mjs` |
 
 `tools/oracle.py` 用 Python 标准库手算解析值，`tools/volume_check.mjs` 把它和
 `cmd/main --stats` 的实测体积逐组比阈值——只跑 oracle.py 没意义（它打印完就
@@ -183,7 +254,8 @@ wasm-gc 三个后端必须算出同一个数。
 ## 已知限制
 
 - 体积与面积是结果度量，不是约束求解；没有做保体积简化（decimation）。
-- 半空间没有有限包围盒，单独网格化需要调用方给范围。
+- 半空间没有有限包围盒，单独网格化必须先给 `--bounds`；给了也会因「曲面从域边界
+  穿出」被拒绝——半空间只有和别的形状做布尔（例如与盒求交）才构成有界实体。
 - 只有均匀缩放；非均匀缩放会让 SDF 不再是距离场（需要除以梯度模）。
 - 二进制 STL 的坐标是 `f32`，这是格式限制；要更高精度请用 OBJ。
 - 回读只做了二进制 STL（OBJ 回读需要文本数字解析，暂缓）。

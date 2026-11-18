@@ -9,6 +9,14 @@ let scene : Ref[@mooncsg.Mesh] = { val: @mooncsg.Mesh::empty(), }
 let grid : Ref[(Int32, Int32, Int32)] = { val: (0, 0, 0), }
 
 ///|
+/// 上一次 `build` 被拒绝的原因（空串表示成功）。
+///
+/// 页面上的滑杆可以被拖到退化值，虽然入口已经夹过一次，但"夹过"不等于
+/// "一定能网格化"。走 `mesh_checked` 之后，失败会落到这里，由 JS 侧显示成
+/// 一行原因，而不是画一个空场景让人以为是参数没生效。
+let build_problem : Ref[String] = { val: "", }
+
+///|
 /// 按形状号生成网格并缓存：
 ///
 /// - `0` 球：`r1` 半径
@@ -69,9 +77,34 @@ pub fn build(
   }
   let (gx, gy, gz) = @mooncsg.grid_shape(bounds, n)
   grid.val = (gx, gy, gz)
-  let m = @mooncsg.mesh(sdf, bounds, @mooncsg.MeshOptions::new(n))
+  let m = match
+    @mooncsg.mesh_checked(sdf, bounds, @mooncsg.MeshOptions::new(n)) {
+    Ok(m) => {
+      build_problem.val = ""
+      m
+    }
+    Err(e) => {
+      build_problem.val = e.describe()
+      @mooncsg.Mesh::empty()
+    }
+  }
   scene.val = m
   m.triangle_count()
+}
+
+///|
+/// 上一次 `build` 的拒绝原因长度（0 表示成功）。`String` 在 wasm-gc 里读不
+/// 出来，所以拆成「长度 + 逐码元」两个纯整数接口。
+pub fn problem_len() -> Int32 {
+  build_problem.val.length()
+}
+
+///|
+pub fn problem_code_unit(i : Int32) -> Int32 {
+  match build_problem.val.get_char(i) {
+    Some(c) => c.to_int()
+    None => 0
+  }
 }
 
 ///|
@@ -168,7 +201,13 @@ pub fn selftest() -> Int32 {
     @mooncsg.Vec3::zero(),
     @mooncsg.Vec3::splat(10.0),
   ).expand(0.5)
-  let m = @mooncsg.mesh(sphere, bounds, @mooncsg.MeshOptions::new(48))
+  // 这里也走 checked：验收壳如果自己都拿不到闭合网格，后面三条断言就不该
+  // 假装在验证什么。
+  let m = match
+    @mooncsg.mesh_checked(sphere, bounds, @mooncsg.MeshOptions::new(48)) {
+    Ok(m) => m
+    Err(_) => @mooncsg.Mesh::empty()
+  }
   let want = 4.0 / 3.0 * 3.141592653589793 * 1000.0
   let rel = (m.volume() - want).abs() / want
   lines.push(check("球体积误差 < 0.5%", rel < 0.005))

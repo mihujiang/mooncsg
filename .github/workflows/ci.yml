@@ -89,3 +89,8 @@ jobs:
       # volume_check.mjs：跑 cmd/main --stats 拿实测体积，逐组比阈值。
       - name: volume check
         run: node tools/volume_check.mjs
+
+      # 「可打印保证」的边界：正常输入必须闭合；半空间、与域面相切、被裁剪、
+      # 空域必须以非零退出码拒绝；--clip 必须明确声明 watertight=false。
+      - name: guard check
+        run: node tools/guard_check.mjs

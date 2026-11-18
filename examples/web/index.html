@@ -237,6 +237,16 @@ async function load() {
   }
 }
 
+// 上一次构建被拒绝的原因。wasm-gc 的 String 读不出来，只能逐码元取。
+function readProblem() {
+  const ex = state.ex;
+  const n = ex.problem_len ? ex.problem_len() : 0;
+  if (!n) return "";
+  let s = "";
+  for (let i = 0; i < n; i++) s += String.fromCharCode(ex.problem_code_unit(i));
+  return s;
+}
+
 // 把 wasm 里的网格读成 JS 侧的类型化数组：之后每帧的变换和排序都在
 // JS 里做，不再逐顶点回调 wasm。
 function readScene() {
@@ -283,6 +293,14 @@ async function build() {
     const res = Number(resEl.value);
     const counts = ex.build(shape, r1, r2, cut, res);
     const ms = performance.now() - t0;
+    // 网格化被拒绝时不覆盖画面，只把原因写在面板里：保留上一次的模型，
+    // 比画一片空白更容易看出「是参数越界，不是程序坏了」。
+    const problem = readProblem();
+    if (problem) {
+      errEl.textContent = problem;
+      hudEl.textContent = "网格化被拒绝";
+      return;
+    }
     const { nv, nt } = readScene();
     // 显示「实际」格点：请求 64 被收窄时滑杆不会告诉你，这行会。
     const g = [ex.grid_dim(0), ex.grid_dim(1), ex.grid_dim(2)];

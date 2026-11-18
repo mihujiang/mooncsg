@@ -49,6 +49,13 @@ const steps = [
     cmd: process.execPath,
     args: ["tools/scene_check.mjs", "examples/web/web.wasm"],
   },
+  // 「可打印保证」的边界：正常输入必须闭合，半空间/相切/裁剪/空域必须
+  // 以非零退出码拒绝。这条不需要 python，所以放在固定步骤里。
+  {
+    name: "guard check",
+    cmd: process.execPath,
+    args: ["tools/guard_check.mjs"],
+  },
 ];
 
 // Python 基准是可选的：机器上没装 python 时跳过，不判失败。

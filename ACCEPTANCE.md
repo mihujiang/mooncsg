@@ -19,30 +19,75 @@
 node tools/acceptance.mjs
 ```
 
-实际输出（2026-11-13）：
+实际输出（2026-11-18）：
 
 ```
-PASS  check          834 ms
-PASS  fmt            95 ms
+PASS  check          356 ms
+PASS  fmt            99 ms
 SKIP  test native    本机无 native 工具链
-PASS  test wasm-gc   4862 ms
-PASS  test js        8448 ms
-PASS  package        914 ms
-PASS  demo           881 ms
-PASS  bench          971 ms
-PASS  build web      180 ms
-PASS  wasm selftest  358 ms
-PASS  wasm scene     1160 ms
-PASS  volume check   2386 ms
+PASS  test wasm-gc   6849 ms
+PASS  test js        11564 ms
+PASS  package        1402 ms
+PASS  demo           1134 ms
+PASS  bench          1270 ms
+PASS  build web      359 ms
+PASS  wasm selftest  387 ms
+PASS  wasm scene     1207 ms
+PASS  guard check    1806 ms
+PASS  volume check   2969 ms
 
-没有失败项（共 12 项）
+没有失败项（共 13 项）
 ```
 
 毫秒列随机器负载浮动，判定只看 PASS / SKIP 两列。
 
-`test wasm-gc` 内部是 `Total tests: 217, passed: 217, failed: 0.`——源码里
-是 42 个 `test` 块，MoonBit 把块内每个 `assert_*` / `inspect` 记成一个用例，
-所以「42 块 / 217 用例」是同一件事的两种数法。
+`test wasm-gc` 内部是 `Total tests: 225, passed: 225, failed: 0.`——源码里
+是 50 个 `test` 块，MoonBit 把块内每个 `assert_*` / `inspect` 记成一个用例，
+所以「50 块 / 225 用例」是同一件事的两种数法。
+
+## 可打印保证：输入条件与拒绝语义
+
+`mesh_checked` 只在四条前置条件同时成立时返回网格，否则返回一个具体错误；
+CLI 默认走它，错误以非零退出码表达，不产出文件。
+
+| 前置条件 | 不满足时 |
+| --- | --- |
+| 采样域各轴长度 > 0、坐标有限 | `DegenerateBounds` |
+| 场值处处有限（无 NaN / Inf） | `NonFiniteField` |
+| 采样域 6 个面上的采样点全部 `f > 0` | `SurfaceClipped` |
+| 采样域内存在内部点 | `NoSurface` |
+
+`node tools/guard_check.mjs` 用真实 CLI 输入把这张表钉死（CI 第 13 项）：
+
+```
+场景                    耗时      判定
+--------------------  ------  --
+正常球（自动采样域）            462 ms  ✓
+半空间：无界，拒绝             151 ms  ✓
+半空间 + 有界域：穿过边界，拒绝     158 ms  ✓
+域小于实体：拒绝              160 ms  ✓
+同一输入加 --clip：输出并声明开口  525 ms  ✓
+域离实体很远：拒绝             250 ms  ✓
+
+通过：6/6 个边界场景
+```
+
+具体到几条命令：
+
+| 命令 | 退出码 | 关键输出 |
+| --- | --- | --- |
+| `sphere 10 --stats` | 0 | `watertight: true`、`open_edges: 0` |
+| `sphere 10 --bounds -10.5,-10.5,-10.5,2,10.5,10.5 --stats` | 1 | 采样域被实体穿过：边界点场值 `-0.015` |
+| 同上加 `--clip` | 0 | `watertight: false`、`open_edges: 402` |
+| `plane 0 0 1 0 --stats` | 1 | 没有有限包围盒 |
+| `plane 0 0 1 0 --bounds -10,-10,-10,10,10,10 --stats` | 1 | 边界点 `(-10,-10,-10)` 场值 `-10` |
+| `sphere 1 --bounds 100,100,100,110,110,110 --stats` | 1 | 采样域内没有曲面 |
+
+`--clip` 是显式放弃保证的开关：输出仍是合法三角网格，但不闭合、不能直接
+切片，`watertight` 为 false，`open_edges` 给出开口边数。
+
+「相切」单列一条库层测试：球盒不加 `expand`，曲面正好落在 6 个面上，
+边界采样 `f == 0`，判据 `f <= 0` 含相等，所以直接拒绝（`marching_test.mbt`）。
 
 ## 精度：实测 vs 解析
 
@@ -118,6 +163,9 @@ wasm-gc 上 13.9 ms → 1419.9 ms，三角形从 2.6 万到 114 万。js 后端�
   单档要跑几十秒，`volume_check.mjs` 固定在 `res = 48`。
 - **偏置挖球的解析体积**：球减偏移球是透镜形，没有写解析式，只验了水密、
   拓扑与包围盒收缩。
+- **薄壳与自交**：`mesh_checked` 的前置条件只覆盖「采样域包住实体」，不覆盖
+  「壁厚小于 2 个体素」（可能整片壳被漏掉）与「自交」（闭合但不可打印）。
+  这两类输入没有自动判定，属于文档声明的不可保证范围。
 - **浏览器实机**：本机只验证到 Edge（`playwright screenshot --channel=msedge`）
   的截图与单行结论；Safari / Firefox 未测。
 - **Pages 部署**：已上线 <https://mihujiang.github.io/mooncsg/>（run 在
@@ -140,3 +188,11 @@ wasm-gc 上 13.9 ms → 1419.9 ms，三角形从 2.6 万到 114 万。js 后端�
   MAX_GRID_SLOTS` 里 `slots <= 16777216` 那条断言会红。
 - 去掉散度体积的朝向校正：`is_watertight` 仍为 true，但 `volume` 变负，
   体积比对与 STL 往返都会失败。
+
+边界语义的两条，同样是「改一行就红」：
+
+- 把 `check_field` 的边界判据从 `f <= 0.0` 放宽成 `f < 0.0`：相切测试
+  （球盒不加 `expand`，边界采样恰好 `f == 0`）会失败。
+- 让 `mesh_checked` 直接返回 `assemble_mesh` 的结果、不做任何检查：
+  `marching_test` 里四个拒绝用例全部失败，`guard_check` 的三个 exit 1
+  场景会变成 exit 0，CI 直接红。

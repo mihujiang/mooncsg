@@ -234,42 +234,26 @@ pub fn grid_shape(bounds : Aabb, resolution : Int32) -> (Int32, Int32, Int32) {
 }
 
 ///|
-/// 从 SDF 生成水密三角网格。
+/// 用已采好的场值建面：每个体素拆 6 个四面体，按四面体的顶点符号取出
+/// 0/1/2 个三角形，交点在格点边上插值、按**格点索引对**焊接，逐面按
+/// 梯度定绕向，最后用散度体积兜底整体翻转。
 ///
-/// 采样在包围盒内做规则体素网格，每个体素拆 6 个四面体，按四面体顶点的
-/// 符号取出 0/1/2 个三角形，交点在格点边上插值、按边键焊接。
-/// 输出朝向由散度体积统一校正：体积为负就整体翻转。
-///
-/// `resolution` 的口径见 `plan_grid`：先夹到 `[2, 512]`，再按总格点收紧。
-pub fn mesh(sdf : Sdf, bounds : Aabb, opts : MeshOptions) -> Mesh {
-  let size = bounds.size()
-  if max_component(size) <= 0.0 {
-    return Mesh::empty()
-  }
-  let (h, nx, ny, nz) = plan_grid(size, opts.resolution)
+/// 这里不校验采样域与实体的关系——那一步在 `check_field` 里。要「保证
+/// 闭合」的调用方请走 `mesh_checked`。
+fn assemble_mesh(
+  sdf : Sdf,
+  bounds : Aabb,
+  h : Double,
+  nx : Int32,
+  ny : Int32,
+  nz : Int32,
+  field : Array[Double],
+  opts : MeshOptions,
+) -> Mesh {
   let nx1 = nx + 1
   let ny1 = ny + 1
   let nz1 = nz + 1
   let slots = (nx1 * ny1 * nz1).to_uint64()
-  let field : Array[Double] = []
-  let mut zi = 0
-  while zi < nz1 {
-    let mut yi = 0
-    while yi < ny1 {
-      let mut xi = 0
-      while xi < nx1 {
-        let p = Vec3::new(
-          bounds.min.x + xi.to_double() * h,
-          bounds.min.y + yi.to_double() * h,
-          bounds.min.z + zi.to_double() * h,
-        )
-        field.push(sdf.eval(p))
-        xi = xi + 1
-      }
-      yi = yi + 1
-    }
-    zi = zi + 1
-  }
   let g = Array::make(8, 0L)
   let fv = Array::make(8, 0.0)
   let pv = Array::make(8, Vec3::zero())
@@ -399,4 +383,236 @@ pub fn mesh(sdf : Sdf, bounds : Aabb, opts : MeshOptions) -> Mesh {
   } else {
     out
   }
+}
+
+///|
+/// 网格化的拒绝原因。
+///
+/// `mesh_checked` 只在「采样域严格包住实体、场值处处有限」时返回网格，
+/// 其余情况明确拒绝。原因很直接：marching tetrahedra 只能在采样域内部
+/// 把曲面闭合起来，曲面一旦碰到采样域边界，那里的面必然被截断成开口。
+/// 那种网格体积偏小、切片软件会当成「有漏的实体」。宁可报错，也不返回
+/// 一个看起来能用、实际不可打印的网格。
+pub(all) enum MeshError {
+  /// 没有有限包围盒：半空间，或含半空间的组合（`bounds()` 返回 `None`）。
+  Unbounded
+  /// 采样域退化：某个轴长度 <= 0，或边界坐标非有限。
+  DegenerateBounds
+  /// 采样到 NaN / Inf 场值，附带首次出现的位置。
+  NonFiniteField(Vec3)
+  /// 采样域边界上出现 `f <= 0`：实体穿过或贴住采样域，网格必然开口。
+  /// 附带该点与它的场值。
+  SurfaceClipped(Vec3, Double)
+  /// 采样域里一个内部点都没有（`f > 0` 处处成立），出来是空网格。
+  NoSurface
+}
+
+///|
+/// 拒绝原因的可读描述。CLI、测试、文档共用这一份，免得三处口径不一致。
+pub fn MeshError::describe(self : MeshError) -> String {
+  match self {
+    Unbounded => "没有有限包围盒（半空间不能直接网格化）"
+    DegenerateBounds =>
+      "采样域退化：某个轴长度为 0 或坐标非有限"
+    NonFiniteField(p) =>
+      "场值非有限（NaN/Inf），首次出现在 (\{p.x}, \{p.y}, \{p.z})"
+    SurfaceClipped(p, f) =>
+      "采样域被实体穿过：边界点 (\{p.x}, \{p.y}, \{p.z}) 的场值是 \{f}，网格会开口"
+    NoSurface => "采样域内没有曲面（f > 0 处处成立）"
+  }
+}
+
+///|
+/// 有限性判断。`v == v` 抓 NaN（NaN 与任何值都不相等），上界抓 Inf。
+/// 这个 core 版本没有 `Double::is_nan` / `is_inf`。
+fn f64_finite(v : Double) -> Bool {
+  v == v && v.abs() <= 1.0e308
+}
+
+///|
+fn vec3_finite(v : Vec3) -> Bool {
+  f64_finite(v.x) && f64_finite(v.y) && f64_finite(v.z)
+}
+
+///|
+/// 规则格点采样，`slot = x + nx1 * (y + ny1 * z)`，与 `assemble_mesh` 的
+/// 取法一致。
+fn sample_field(
+  sdf : Sdf,
+  bounds : Aabb,
+  h : Double,
+  nx : Int32,
+  ny : Int32,
+  nz : Int32,
+) -> Array[Double] {
+  let nx1 = nx + 1
+  let ny1 = ny + 1
+  let nz1 = nz + 1
+  let field : Array[Double] = []
+  let mut zi = 0
+  while zi < nz1 {
+    let mut yi = 0
+    while yi < ny1 {
+      let mut xi = 0
+      while xi < nx1 {
+        field.push(
+          sdf.eval(
+            Vec3::new(
+              bounds.min.x + xi.to_double() * h,
+              bounds.min.y + yi.to_double() * h,
+              bounds.min.z + zi.to_double() * h,
+            ),
+          ),
+        )
+        xi = xi + 1
+      }
+      yi = yi + 1
+    }
+    zi = zi + 1
+  }
+  field
+}
+
+///|
+/// 检查采样结果能否保证「闭合、可切片」：
+///
+/// 1. 每个格点的场值必须有限——NaN/Inf 会被插值放大成垃圾三角形；
+/// 2. 采样域 6 个面上的每个格点必须 `f > 0`。
+///
+/// 第 2 条不是保守估计，而是这一实现下的充要条件：三角形只在相邻四面体
+/// 之间按**格点索引对**配对焊接，曲面上的每个顶点都落在一条两端格点异号
+/// 的边上。若某条边的两端都贴着采样域边界，曲面就从边界穿出，那个顶点
+/// 找不到对侧三角形，边界处留下开口。反之边界全正意味着曲面整块在内部，
+/// 每个顶点都能在域内找到对侧三角形，于是「每条边恰好 2 面」是被构造
+/// 保证的，不是概率性的。
+fn check_field(
+  bounds : Aabb,
+  h : Double,
+  nx : Int32,
+  ny : Int32,
+  nz : Int32,
+  field : Array[Double],
+) -> MeshError? {
+  let nx1 = nx + 1
+  let ny1 = ny + 1
+  let nz1 = nz + 1
+  let mut zi = 0
+  while zi < nz1 {
+    let mut yi = 0
+    while yi < ny1 {
+      let mut xi = 0
+      while xi < nx1 {
+        let slot = xi + nx1 * (yi + ny1 * zi)
+        let f = field[slot]
+        if !f64_finite(f) {
+          return Some(
+            NonFiniteField(
+              Vec3::new(
+                bounds.min.x + xi.to_double() * h,
+                bounds.min.y + yi.to_double() * h,
+                bounds.min.z + zi.to_double() * h,
+              ),
+            ),
+          )
+        }
+        let on_boundary = xi == 0 ||
+          xi == nx ||
+          yi == 0 ||
+          yi == ny ||
+          zi == 0 ||
+          zi == nz
+        if on_boundary && f <= 0.0 {
+          return Some(
+            SurfaceClipped(
+              Vec3::new(
+                bounds.min.x + xi.to_double() * h,
+                bounds.min.y + yi.to_double() * h,
+                bounds.min.z + zi.to_double() * h,
+              ),
+              f,
+            ),
+          )
+        }
+        xi = xi + 1
+      }
+      yi = yi + 1
+    }
+    zi = zi + 1
+  }
+  None
+}
+
+///|
+/// 生成三角网格，**不校验**采样域与实体的关系。
+///
+/// 采样域小于实体、实体贴住域边界、场值含 NaN 时它照样返回网格——那种
+/// 网格会开口或含垃圾三角形。只在「前提已经确认成立」时用它（比如故意
+/// 要给半空间做裁剪网格）。要保证闭合请用 `mesh_checked`。
+///
+/// `resolution` 的口径见 `plan_grid`：先夹到 `[2, 512]`，再按总格点收紧。
+pub fn mesh_unchecked(sdf : Sdf, bounds : Aabb, opts : MeshOptions) -> Mesh {
+  let size = bounds.size()
+  if max_component(size) <= 0.0 {
+    return Mesh::empty()
+  }
+  let (h, nx, ny, nz) = plan_grid(size, opts.resolution)
+  let field = sample_field(sdf, bounds, h, nx, ny, nz)
+  assemble_mesh(sdf, bounds, h, nx, ny, nz, field, opts)
+}
+
+///|
+/// 带前置检查的网格化：要么返回一块**闭合、可直接切片**的网格，要么返回
+/// 拒绝原因，不存在「看起来能用、其实漏面」的第三种结果。
+///
+/// 通过检查时输出满足：每条无向边恰好被 2 个三角形共享（`is_watertight`），
+/// 朝向逐面由梯度决定、以体积符号兜底，空网格不会被当成成功返回。
+///
+/// 检查覆盖：
+///
+/// - 采样域必须体积为正、坐标有限（`DegenerateBounds`）；
+/// - 场值必须处处有限（`NonFiniteField`）；
+/// - 实体必须**严格位于**采样域内部：6 个面上的采样点全部 `f > 0`
+///   （`SurfaceClipped`）——半空间、被裁剪的实体、与域面相切的实体都在
+///   这里被拒；
+/// - 采样域内必须真有曲面（`NoSurface`）。
+///
+/// 它不保证的（属于采样精度或输入合法性，不是拓扑问题）：
+///
+/// - 壁厚小于 2 个体素的薄壳：两个格点可能同号，整片壳被漏掉，结果是空
+///   网格（`NoSurface`）或体积明显偏小；
+/// - `|∇f|` 明显偏离 1 的非精确 SDF：体积与法线有偏差，拓扑仍闭合；
+/// - 自交实体（如管半径大于母线半径的环面）：输出闭合但不可打印。
+pub fn mesh_checked(
+  sdf : Sdf,
+  bounds : Aabb,
+  opts : MeshOptions,
+) -> Result[Mesh, MeshError] {
+  if !vec3_finite(bounds.min) || !vec3_finite(bounds.max) {
+    return Err(DegenerateBounds)
+  }
+  let size = bounds.size()
+  if size.x <= 0.0 || size.y <= 0.0 || size.z <= 0.0 {
+    return Err(DegenerateBounds)
+  }
+  let (h, nx, ny, nz) = plan_grid(size, opts.resolution)
+  let field = sample_field(sdf, bounds, h, nx, ny, nz)
+  match check_field(bounds, h, nx, ny, nz, field) {
+    Some(e) => Err(e)
+    None => {
+      let m = assemble_mesh(sdf, bounds, h, nx, ny, nz, field, opts)
+      if m.is_empty() {
+        Err(NoSurface)
+      } else {
+        Ok(m)
+      }
+    }
+  }
+}
+
+///|
+/// `mesh_unchecked` 的旧名字，保留给 0.1.x 的调用方。
+///
+/// 它**不做**前置检查；要「保证闭合可切片」请用 `mesh_checked`。
+pub fn mesh(sdf : Sdf, bounds : Aabb, opts : MeshOptions) -> Mesh {
+  mesh_unchecked(sdf, bounds, opts)
 }

@@ -138,7 +138,49 @@ fn is_value_option(a : String) -> Bool {
   a == "--name" ||
   a == "--op" ||
   a == "--k" ||
+  a == "--bounds" ||
   a == "--at"
+}
+
+///|
+/// 逗号分隔的十进制数，`--at x,y,z` 与 `--bounds x0,y0,z0,x1,y1,z1` 共用。
+fn parse_csv(v : String) -> Array[Double]? {
+  let parts : Array[Double] = []
+  let mut start = 0
+  let mut j = 0
+  while j <= v.length() {
+    if j == v.length() || code_at(v, j) == 44 {
+      let mut seg = ""
+      let mut t = start
+      while t < j {
+        seg = seg + substr(v, t, t + 1)
+        t = t + 1
+      }
+      match parse_f64(seg) {
+        Some(d) => parts.push(d)
+        None => return None
+      }
+      start = j + 1
+    }
+    j = j + 1
+  }
+  Some(parts)
+}
+
+///|
+/// 拒绝输出：这类输入得到的网格会开口，切片软件会当成漏体。
+///
+/// 先打人话，再 `abort`——这个工具链没有 `@env.exit`，而「拒绝」必须体现
+/// 在退出码上，否则脚本会把一次失败的网格化当成成功。
+fn reject(msg : String) -> Unit {
+  eprintln("错误：\{msg}")
+  eprintln(
+    "拒绝输出：这类输入得不到闭合网格，切片软件会当成漏体。半空间请用 --bounds 给出有界域；",
+  )
+  eprintln(
+    "确实只想要裁剪网格时加 --clip，那时 watertight 为 false，open_edges 给出开口边数。",
+  )
+  abort(msg)
 }
 
 ///|
@@ -154,7 +196,14 @@ fn shape_name(a : String) -> String {
 ///|
 fn is_shape(name : String) -> Bool {
   match name {
-    "sphere" | "box" | "cyl" | "cylinder" | "cone" | "capsule" | "torus" => true
+    "sphere"
+    | "box"
+    | "cyl"
+    | "cylinder"
+    | "cone"
+    | "capsule"
+    | "torus"
+    | "plane" => true
     _ => false
   }
 }
@@ -202,6 +251,17 @@ fn make_shape(name : String, vals : Array[Double]) -> @mooncsg.Sdf? {
       } else {
         None
       }
+    "plane" =>
+      if n >= 4 {
+        Some(
+          @mooncsg.Sdf::plane(
+            @mooncsg.Vec3::new(vals[0], vals[1], vals[2]),
+            vals[3],
+          ),
+        )
+      } else {
+        None
+      }
     _ => None
   }
 }
@@ -239,6 +299,9 @@ fn print_help() -> Unit {
   )
   println("  capsule R H           胶囊，半径 R、圆心段长 H")
   println("  torus R r             环面，母线半径 R、管半径 r")
+  println(
+    "  plane NX NY NZ D      半空间（法向 + 偏移 D）；无界，必须配 --bounds",
+  )
   println("")
   println("选项：")
   println(
@@ -250,11 +313,25 @@ fn print_help() -> Unit {
     "  --res 64                       网格分辨率（上限 512，总格点另行收紧）",
   )
   println(
+    "  --bounds x0,y0,z0,x1,y1,z1     显式采样域（默认取包围盒外扩 0.5，半空间必须给）",
+  )
+  println(
+    "  --clip                         允许裁剪出开口网格（放弃可切片保证，watertight=false）",
+  )
+  println(
     "  --format stl|obj               输出格式（默认 stl，即 ASCII STL）",
   )
   println("  --name NAME                    模型名，写进 solid/对象行")
   println(
     "  --stats                        只打印三角数、体积、面积、拓扑",
+  )
+  println("")
+  println("")
+  println(
+    "保证范围：只在「实体严格位于采样域内部、场值处处有限」时输出网格，",
+  )
+  println(
+    "否则以非零退出码拒绝——半空间、与域面相切、被裁剪、NaN/Inf 参数都不出文件。",
   )
   println("")
   println(
@@ -282,6 +359,8 @@ fn main {
   let mut base : @mooncsg.Sdf? = None
   let tools : Array[@mooncsg.Sdf] = []
   let mut offset : @mooncsg.Vec3? = None
+  let mut bounds_arg : @mooncsg.Aabb? = None
+  let mut clip = false
   let mut i = 1
   while i < n {
     let a = args[i]
@@ -290,6 +369,9 @@ fn main {
       return
     } else if a == "--stats" {
       want_stats = true
+      i = i + 1
+    } else if a == "--clip" {
+      clip = true
       i = i + 1
     } else if is_value_option(a) {
       if i + 1 >= n {
@@ -319,39 +401,42 @@ fn main {
             return
           }
         }
+      } else if a == "--bounds" {
+        match parse_csv(v) {
+          Some(nums) =>
+            if nums.length() != 6 {
+              eprintln(
+                "错误：--bounds 需要 x0,y0,z0,x1,y1,z1，收到 \{v}",
+              )
+              return
+            } else {
+              bounds_arg = Some(
+                @mooncsg.Aabb::new(
+                  @mooncsg.Vec3::new(nums[0], nums[1], nums[2]),
+                  @mooncsg.Vec3::new(nums[3], nums[4], nums[5]),
+                ),
+              )
+            }
+          None => {
+            eprintln("错误：--bounds 里有非数字，收到 \{v}")
+            return
+          }
+        }
       } else {
         // --at x,y,z
-        let parts : Array[String] = []
-        let mut start = 0
-        let mut j = 0
-        while j <= v.length() {
-          if j == v.length() || code_at(v, j) == 44 {
-            let mut seg = ""
-            let mut t = start
-            while t < j {
-              seg = seg + substr(v, t, t + 1)
-              t = t + 1
-            }
-            parts.push(seg)
-            start = j + 1
-          }
-          j = j + 1
-        }
-        if parts.length() != 3 {
-          eprintln("错误：--at 需要 x,y,z，收到 \{v}")
-          return
-        }
-        let xyz : Array[Double] = []
-        for p in parts {
-          match parse_f64(p) {
-            Some(d) => xyz.push(d)
-            None => {
-              eprintln("错误：--at 里的 \{p} 不是数字")
+        match parse_csv(v) {
+          Some(xyz) =>
+            if xyz.length() == 3 {
+              offset = Some(@mooncsg.Vec3::new(xyz[0], xyz[1], xyz[2]))
+            } else {
+              eprintln("错误：--at 需要 x,y,z，收到 \{v}")
               return
             }
+          None => {
+            eprintln("错误：--at 里有非数字，收到 \{v}")
+            return
           }
         }
-        offset = Some(@mooncsg.Vec3::new(xyz[0], xyz[1], xyz[2]))
       }
       i = i + 2
     } else if is_shape(shape_name(a)) {
@@ -402,24 +487,37 @@ fn main {
     Some(o) => sdf.at(o)
     None => sdf
   }
-  let bounds = match sdf.bounds() {
-    Some(b) => b.expand(0.5)
-    None => {
-      eprintln(
-        "错误：这个组合没有有限包围盒（半空间？），无法自动网格化",
-      )
-      return
-    }
+  let bounds = match bounds_arg {
+    Some(b) => b
+    None =>
+      match sdf.bounds() {
+        Some(b) => b.expand(0.5)
+        None => {
+          reject(
+            "这个组合没有有限包围盒（半空间？）。用 --bounds x0,y0,z0,x1,y1,z1 给出有界采样域",
+          )
+          @mooncsg.Aabb::new(@mooncsg.Vec3::zero(), @mooncsg.Vec3::zero())
+        }
+      }
   }
   if res < 2 {
     eprintln("错误：--res 至少是 2")
     return
   }
-  let m = @mooncsg.mesh(
-    sdf,
-    bounds,
-    @mooncsg.MeshOptions::new(int_to_int32(res)),
-  )
+  let opts = @mooncsg.MeshOptions::new(int_to_int32(res))
+  // 默认走 checked：只有「实体严格在采样域内、场值有限、域内真有曲面」才出
+  // 网格。`--clip` 是显式放弃这条保证，用来做裁剪网格（地形、剖面）。
+  let m = if clip {
+    @mooncsg.mesh_unchecked(sdf, bounds, opts)
+  } else {
+    match @mooncsg.mesh_checked(sdf, bounds, opts) {
+      Ok(ok) => ok
+      Err(e) => {
+        reject(e.describe())
+        @mooncsg.Mesh::empty()
+      }
+    }
+  }
   // 这个工具链的 `%eprintln` 与 stdout 同流（实测重定向后 stderr 是 0 字节），
   // 所以指标和模型只能二选一：`--stats` 时只输出指标，stdout 才不会混进
   // 指标行、重定向得到的才是干净文件。
@@ -429,6 +527,7 @@ fn main {
     println("volume:     \{m.volume()}")
     println("area:       \{m.area()}")
     println("watertight: \{m.is_watertight()}")
+    println("open_edges: \{m.open_edges()}")
     println("euler:      \{m.euler()} (genus \{m.genus()})")
     println(
       "bounds:     \{bounds.min.x},\{bounds.min.y},\{bounds.min.z} .. \{bounds.max.x},\{bounds.max.y},\{bounds.max.z}",

@@ -169,6 +169,29 @@ pub fn Mesh::is_watertight(self : Mesh) -> Bool {
 }
 
 ///|
+/// 开口边数：只被 1 个（或 3 个以上）三角形共享的边。
+///
+/// `is_watertight()` 只回答「是否全闭合」，这里回答「开口有多大」。用在
+/// `--clip` 这种故意裁剪的场景：裁剪出来的网格不该被当成可打印实体，但
+/// 开口的数量要说得出来，而不是只给一个 false。
+pub fn Mesh::open_edges(self : Mesh) -> Int32 {
+  let keys = self.edge_keys()
+  let mut count = 0
+  let mut i = 0
+  while i < keys.length() {
+    let mut j = i + 1
+    while j < keys.length() && keys[j] == keys[i] {
+      j = j + 1
+    }
+    if j - i != 2 {
+      count = count + 1
+    }
+    i = j
+  }
+  count
+}
+
+///|
 /// 唯一边数。
 pub fn Mesh::edge_count(self : Mesh) -> Int32 {
   let keys = self.edge_keys()
