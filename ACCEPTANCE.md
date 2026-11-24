@@ -1,6 +1,6 @@
 # 验收记录
 
-本文件记录 **0.1.8** 这一版实际跑出来的数字。所有数值都来自下面这条命令，
+本文件记录 **0.1.9** 这一版实际跑出来的数字。所有数值都来自下面这条命令，
 不是估算，也不是设计目标。
 
 ## 环境
@@ -19,30 +19,30 @@
 node tools/acceptance.mjs
 ```
 
-实际输出（2026-11-18）：
+实际输出（2026-11-24）：
 
 ```
-PASS  check          836 ms
-PASS  fmt            101 ms
+PASS  check          788 ms
+PASS  fmt            246 ms
 SKIP  test native    本机无 native 工具链
-PASS  test wasm-gc   7295 ms
-PASS  test js        11973 ms
-PASS  package        968 ms
-PASS  demo           1262 ms
-PASS  bench          1210 ms
-PASS  build web      362 ms
-PASS  wasm selftest  437 ms
-PASS  wasm scene     1434 ms
-PASS  guard check    1815 ms
-PASS  volume check   3185 ms
+PASS  test wasm-gc   10047 ms
+PASS  test js        15953 ms
+PASS  package        920 ms
+PASS  demo           1059 ms
+PASS  bench          826 ms
+PASS  build web      205 ms
+PASS  wasm selftest  410 ms
+PASS  wasm scene     1574 ms
+PASS  guard check    1901 ms
+PASS  volume check   3512 ms
 
 没有失败项（共 13 项）
 ```
 
 毫秒列随机器负载浮动，判定只看 PASS / SKIP 两列。
 
-`test wasm-gc` / `test js` 内部都是 `Total tests: 56, passed: 56, failed: 0.`
-——源码里 56 个 `test` 块，当前工具链按块计数（一块一个用例），块内逐条
+`test wasm-gc` / `test js` 内部都是 `Total tests: 63, passed: 63, failed: 0.`
+——源码里 63 个 `test` 块，当前工具链按块计数（一块一个用例），块内逐条
 `assert_*` 断言，任一条红整块就红。
 
 ## 可打印保证：输入条件与拒绝语义
@@ -178,8 +178,11 @@ wasm-gc 上 13.9 ms → 1419.9 ms，三角形从 2.6 万到 114 万。js 后端�
 - **偏置挖球的解析体积**：球减偏移球是透镜形，没有写解析式，只验了水密、
   拓扑与包围盒收缩。
 - **薄壳与自交**：`mesh_checked` 的前置条件只覆盖「采样域包住实体」，不覆盖
-  「壁厚小于 2 个体素」（可能整片壳被漏掉）与「自交」（闭合但不可打印）。
-  这两类输入没有自动判定，属于文档声明的不可保证范围。
+  「壁厚小于约 1 个体素」与「自交」（闭合但不可打印）。薄壳的失败方式不是空
+  网格而是**体积偏大**：内腔表面被当成实体边界，网格仍水密仍流形，`NotClosed`
+  兜不住，只能靠 `audit()` 的壳数告警或与解析体积对拍。实测记录在
+  `mesh_test.mbt` 的 `thin wall inflates volume while staying watertight`（壁厚
+  0.2 / 体素 0.66 时体积是解析值的 29 倍，壁厚 0.6 时误差 0.1 %）。
 - **浏览器实机**：本机只验证到 Edge（`playwright screenshot --channel=msedge`）
   的截图与单行结论；Safari / Firefox 未测。
 - **Pages 部署**：已上线 <https://mihujiang.github.io/mooncsg/>（run 在

@@ -20,12 +20,13 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 已覆盖 M0–M6：
 
 - `vec.mbt`：`Vec3` / `Mat3` / `Aabb`
-- `sdf.mbt`：球、盒、半空间、圆柱、圆台、胶囊、环面；平移/旋转/缩放；
-  并/交/差/平滑并；包围盒
+- `sdf.mbt`：球、盒、半空间、圆柱、圆台、胶囊、环面；平移/矩阵旋转/缩放；
+  并/交/差/平滑并；包围盒；法线优先走解析梯度（无闭式的节点回退中心差分）
 - `marching.mbt`：规则体素 + 6 四面体分解 + 边键焊接 + 梯度投影；
   `mesh_checked` 的采样域前置检查与拒绝语义（`mesh` / `mesh_unchecked` 不检查）
 - `mesh.mbt`：散度体积、面积、水密判定、欧拉示性数 / 亏格（只对单个闭合壳
-  有定义，多壳返回 `-1`）、FNV-1a 指纹
+  有定义，多壳返回 `-1`）、连通壳拆分（`shell_count` / `shells` /
+  `largest_shell`）、一次性体检（`audit` → `MeshAudit`，含 JSON）、FNV-1a 指纹
 - `export.mbt`：OBJ、ASCII STL、二进制 STL，以及二进制 STL 回读
 - `examples/web`：交互 demo（调参 → 网格 → canvas 2D 软件投影 + 体积/面积/拓扑），
   页面里带 `?selftest=1` 的验收路径
@@ -41,7 +42,7 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 
 ## 安装
 
-已发布到 mooncakes（`weopqrst/mooncsg@0.1.3`）：
+已发布到 mooncakes（`weopqrst/mooncsg@0.1.9`）：
 
 ```bash
 moon add weopqrst/mooncsg
@@ -51,7 +52,7 @@ moon add weopqrst/mooncsg
 
 ```moonbit
 import {
-  "weopqrst/mooncsg@0.1.3",
+  "weopqrst/mooncsg@0.1.9",
 }
 ```
 
@@ -60,7 +61,7 @@ import {
 ## 快速开始
 
 ```bash
-moon test                 # 56 个 test 块，wasm-gc / js / native 三后端都要跑
+moon test                 # 63 个 test 块，wasm-gc / js / native 三后端都要跑
 moon run examples/demo    # 盒减球，打印体积/面积/拓扑
 moon run examples/bench --release   # 网格化耗时基线
 moon check --deny-warn
@@ -68,6 +69,7 @@ moon fmt --check
 
 # 边界语义的两端：能保证的与必须拒绝的
 moon run cmd/main -- sphere 10 --res 32 > s.stl   # exit 0：闭合可切片
+moon run cmd/main -- sphere 10 --res 32 --audit   # JSON 体检：水密/流形/壳数/亏格/告警
 moon run cmd/main -- plane 0 0 1 0 --stats        # exit 1：半空间没有有限包围盒
 moon run cmd/main -- sphere 10 --bounds -10.5,-10.5,-10.5,2,10.5,10.5 --stats
                                                   # exit 1：采样域被实体穿出
@@ -200,14 +202,18 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 
 ### 明确不保证的
 
-- **薄壳**：壁厚小于 2 个体素时两侧可能落进同一格点，整片壳被漏掉——报
-  `NoSurface` 或体积明显偏小。加密 `--res`，或把壁厚做大。
+- **薄壳**：壁厚小于约 1 个体素时，格点采样漏掉壁内的负区，内腔表面被当成
+  实体边界——网格**仍然水密、仍然流形**，但体积**偏大**（实测壁厚 0.2 / 体素
+  0.66 时是解析值的 29 倍，壁厚 0.6 时误差 0.1 %）。`NotClosed` 兜不住这类，
+  看 `audit()` 的壳数告警，或拿解析体积对拍。加密 `--res` 到壁厚以下即可。
 - **非精确 SDF**（`|∇f|` 明显偏离 1）：拓扑仍闭合，但体积与法线有偏差。
 - **自交实体**（环面管半径 ≥ 母线半径、`subtract` 挖成非流形）：输出闭合，
   但不是合法实体，切片器会拒绝。
 - **多壳**：`is_watertight` 对多个不相交壳仍为真（每条边 2 面），但
-  `genus()` 返回 `-1` 表示「单壳亏格不可用」。多壳本身仍是流形，
-  `is_manifold()` 为真——它拒的是两瓣只在**一个顶点**相触（星形分成两个环）。
+  `genus()` 返回 `-1` 表示「单壳亏格不可用」——它现在真的数壳，不靠 `χ` 猜
+  （两个环面 `χ` 都是 0，加起来还是 0）。壳数看 `shell_count()`，要逐壳亏格先
+  `shells()`，只要主体就 `largest_shell()`。多壳本身仍是流形，`is_manifold()`
+  为真——它拒的是两瓣只在**一个顶点**相触（星形分成两个环）。
 - **非流形顶点**：两瓣实体共用一个顶点（手搓网格、或 STL 导入按坐标焊接后把
   相切的两瓣焊到同一点）时，`is_watertight()` 仍为真，`is_manifold()` 为假。
   本库的 `union` 不会产生这种网格（两球外切取并是两块独立的壳），所以
@@ -220,6 +226,7 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | 判据 | 测试 |
 | --- | --- |
 | 球/盒各 1000 个随机点、圆柱 / 平面 / 圆台 / 胶囊的解析距离误差 < 1e-12，环面按参数化构造点对拍 | `sdf_test.mbt` |
+| 梯度模长为 1，且沿法线走 `t` 距离正好变 `t`（球 / 盒 / 圆柱 / 胶囊 / 环面 / 旋转后的球，各 200 个随机点） | `sdf_test.mbt` |
 | 布尔与 `min` / `max` / 取负逐点一致 | `sdf_test.mbt` |
 | 球体积误差 < 0.5%（128 分辨率）、盒 < 1%（40 分辨率） | `mesh_test.mbt` |
 | 环面亏格 = 1、欧拉示性数 = 0 | `mesh_test.mbt` |
@@ -231,6 +238,10 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | 每条无向边恰好 2 个面（水密） | `mesh_test.mbt` |
 | 四面体闭合流形为真；两个四面体共用一个顶点时 `is_watertight` 真但 `is_manifold` 假 | `mesh_test.mbt` |
 | 一条边挂 3 个面、去掉一个面的开口网格、空网格的 `is_manifold` 结果 | `mesh_test.mbt` |
+| 两个不相交环面 → 2 壳、整体亏格 -1、各壳亏格 1；`largest_shell` 丢掉远处碎屑后仍是单壳 | `mesh_test.mbt` |
+| `audit()` 对干净实体零告警、对多壳与开口给告警，JSON 字段与实测一致 | `mesh_test.mbt` |
+| 壁厚小于 1 个体素时体积偏大但仍水密；同形状加密后回到 5 % 以内 | `mesh_test.mbt` |
+| 矩阵旋转的矩阵正交性自检：旋转阵为真，拉伸 / 剪切 / 零矩阵为假 | `sdf_test.mbt` |
 | `mesh_checked` 对相切 / 裁剪 / 空域 / 退化域 / 非有限场值分别返回对应错误 | `marching_test.mbt` |
 | 60 个随机实体在 `bounds().expand(0.5)` 下全部闭合、`open_edges == 0` | `marching_test.mbt` |
 | 两球外切后的并集仍闭合（体积误差 0.8 %），与「相切采样域必须拒绝」并列 | `marching_test.mbt` |
@@ -275,7 +286,9 @@ wasm-gc 三个后端必须算出同一个数。
 - 体积与面积是结果度量，不是约束求解；没有做保体积简化（decimation）。
 - 半空间没有有限包围盒，单独网格化必须先给 `--bounds`；给了也会因「曲面从域边界
   穿出」被拒绝——半空间只有和别的形状做布尔（例如与盒求交）才构成有界实体。
-- 只有均匀缩放；非均匀缩放会让 SDF 不再是距离场（需要除以梯度模）。
+- 只有均匀缩放；非均匀缩放会让 SDF 不再是距离场（需要除以梯度模）。旋转要
+  自己给矩阵（`Sdf::rotate`），core 没有三角函数，转完可以用
+  `Mat3::is_orthonormal` 自检——非正交矩阵不会报错，只会让距离场被拉伸。
 - 二进制 STL 的坐标是 `f32`，这是格式限制；要更高精度请用 OBJ。
 - 回读只做了二进制 STL（OBJ 回读需要文本数字解析，暂缓）。
 - 没有 BVH / 距离查询加速，`eval` 直接遍历树；雏版靠分辨率控制成本。

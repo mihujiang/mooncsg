@@ -327,6 +327,9 @@ fn print_help() -> Unit {
   println(
     "  --stats                        只打印三角数、体积、面积、拓扑",
   )
+  println(
+    "  --audit                        只打印 JSON 体检报告（水密/流形/壳数/亏格/告警）",
+  )
   println("")
   println("")
   println(
@@ -355,6 +358,7 @@ fn main {
   let mut format = "stl"
   let mut name = "mooncsg"
   let mut want_stats = false
+  let mut want_audit = false
   let mut op = "diff"
   let mut k = 2.0
   // 主形状与后接的操作形状
@@ -371,6 +375,9 @@ fn main {
       return
     } else if a == "--stats" {
       want_stats = true
+      i = i + 1
+    } else if a == "--audit" {
+      want_audit = true
       i = i + 1
     } else if a == "--clip" {
       clip = true
@@ -523,6 +530,10 @@ fn main {
   // 这个工具链的 `%eprintln` 与 stdout 同流（实测重定向后 stderr 是 0 字节），
   // 所以指标和模型只能二选一：`--stats` 时只输出指标，stdout 才不会混进
   // 指标行、重定向得到的才是干净文件。
+  if want_audit {
+    println(m.audit().to_json())
+    return
+  }
   if want_stats {
     println("triangles:  \{m.triangle_count()}")
     println("vertices:   \{m.vertex_count()}")
@@ -530,6 +541,8 @@ fn main {
     println("area:       \{m.area()}")
     println("watertight: \{m.is_watertight()}")
     println("open_edges: \{m.open_edges()}")
+    println("manifold:   \{m.is_manifold()}")
+    println("shells:     \{m.shell_count()}")
     println("euler:      \{m.euler()} (genus \{m.genus()})")
     println(
       "bounds:     \{bounds.min.x},\{bounds.min.y},\{bounds.min.z} .. \{bounds.max.x},\{bounds.max.y},\{bounds.max.z}",

@@ -334,3 +334,104 @@ test "torus matches analytic distance on parametric construction" {
   }
   assert_true(max_err < 1.0e-12)
 }
+
+///|
+test "mat3 orthonormality check accepts rotations and rejects scaling" {
+  // 单位阵的点积精确是 0 / 1，容差给 0 也应该通过。
+  assert_true(@mooncsg.Mat3::identity().is_orthonormal(0.0))
+  // 绕 z 轴旋转：列由半角有理参数化给出，cos² + sin² 只在末位有舍入，
+  // 所以这里不猜一个容差，而是把实际偏差测出来再卡阈值。
+  let mut state = 20261124UL
+  let mut i = 0
+  let mut worst = 0.0
+  while i < 200 {
+    state = next_state(state)
+    let u = unit(state) * 2.0 - 1.0
+    state = next_state(state)
+    let sgn = if unit(state) < 0.5 { 1.0 } else { -1.0 }
+    let ct = (1.0 - u * u) / (1.0 + u * u)
+    let st = sgn * 2.0 * u / (1.0 + u * u)
+    let rot = @mooncsg.Mat3::from_columns(
+      @mooncsg.Vec3::new(ct, st, 0.0),
+      @mooncsg.Vec3::new(-st, ct, 0.0),
+      @mooncsg.Vec3::new(0.0, 0.0, 1.0),
+    )
+    assert_true(rot.is_orthonormal(1.0e-14))
+    // 旋转的逆（转置）当然也是正交阵。
+    assert_true(rot.transpose().is_orthonormal(1.0e-14))
+    let dev = (rot.c0.dot(rot.c0) - 1.0).abs()
+    if dev > worst {
+      worst = dev
+    }
+    i = i + 1
+  }
+  assert_true(worst < 1.0e-14)
+
+  // 拉伸：列长不是 1，距离场会被整体缩放。
+  let stretched = @mooncsg.Mat3::from_columns(
+    @mooncsg.Vec3::new(2.0, 0.0, 0.0),
+    @mooncsg.Vec3::new(0.0, 1.0, 0.0),
+    @mooncsg.Vec3::new(0.0, 0.0, 1.0),
+  )
+  assert_true(!stretched.is_orthonormal(1.0e-12))
+  // 剪切：每列长度都是 1，只有两列点积不为 0，单位化救不回来。
+  let sheared = @mooncsg.Mat3::from_columns(
+    @mooncsg.Vec3::new(1.0, 0.0, 0.0),
+    @mooncsg.Vec3::new(1.0, 1.0, 0.0).normalize(),
+    @mooncsg.Vec3::new(0.0, 0.0, 1.0),
+  )
+  assert_true(!sheared.is_orthonormal(1.0e-12))
+  // 零矩阵：列长全为 0，整个空间塌成一点。
+  let zero = @mooncsg.Mat3::from_columns(
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::zero(),
+  )
+  assert_true(!zero.is_orthonormal(1.0e-12))
+  // 容差是逐项比较，不是整体误差：1e-9 的拉伸在严阈值下不过、宽阈值下过。
+  let nudged = @mooncsg.Mat3::from_columns(
+    @mooncsg.Vec3::new(1.0 + 1.0e-9, 0.0, 0.0),
+    @mooncsg.Vec3::new(0.0, 1.0, 0.0),
+    @mooncsg.Vec3::new(0.0, 0.0, 1.0),
+  )
+  assert_true(!nudged.is_orthonormal(1.0e-12))
+  assert_true(nudged.is_orthonormal(1.0e-6))
+}
+
+///|
+test "gradient is unit length and advances distance one-to-one" {
+  // 精确 SDF 的两条性质：|∇f| = 1，且沿法线走 t 距离正好变 t。这两条不依赖
+  // 「另一个梯度实现」，所以对解析梯度与中心差分同时成立——换了实现这条
+  // 测试照样有意义（中心差分的误差会顶到 1e-10 以外，测试会红）。
+  let shapes : Array[@mooncsg.Sdf] = [
+    @mooncsg.Sdf::sphere(10.0),
+    @mooncsg.Sdf::box(@mooncsg.Vec3::new(6.0, 4.0, 5.0)),
+    @mooncsg.Sdf::cylinder(5.0, 7.0),
+    @mooncsg.Sdf::capsule(3.0, 5.0),
+    @mooncsg.Sdf::torus(8.0, 3.0),
+    // 旋转只对正交矩阵保证距离语义，这里用绕 z 轴 90° 的精确旋转。
+    @mooncsg.Sdf::sphere(10.0)
+    .rotate(
+      @mooncsg.Mat3::from_columns(
+        @mooncsg.Vec3::new(0.0, 1.0, 0.0),
+        @mooncsg.Vec3::new(-1.0, 0.0, 0.0),
+        @mooncsg.Vec3::new(0.0, 0.0, 1.0),
+      ),
+    )
+    .at(@mooncsg.Vec3::new(2.0, -3.0, 1.0)),
+  ]
+  let step = 0.05
+  for sdf in shapes {
+    let mut i = 0
+    while i < 200 {
+      let p = sample(20261124UL, i)
+      let g = sdf.gradient(p)
+      let len = g.length()
+      assert_true((len - 1.0).abs() < 1.0e-12)
+      let n = g.div(len)
+      let err = (sdf.eval(p.add(n.mul(step))) - (sdf.eval(p) + step)).abs()
+      assert_true(err < 1.0e-10)
+      i = i + 1
+    }
+  }
+}

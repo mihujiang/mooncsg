@@ -33,8 +33,9 @@ tools/          外部验收：Python 解析基准、Node 验收、一键 PASS �
 
 ## vec.mbt：只做几何需要的运算
 
-不做通用线性代数库。`Vec3` 只有加/减/乘/点/叉/长度，`Mat3` 只有转置与
-矩阵乘向量，`Aabb` 只有 `min` / `max` / `expand` / `union`。理由很实际：
+不做通用线性代数库。`Vec3` 只有加/减/乘/点/叉/长度，`Mat3` 只有转置、
+矩阵乘向量与正交性自检（`is_orthonormal`），`Aabb` 只有 `min` / `max` /
+`expand` / `union`。理由很实际：
 SDF 的每个节点都要在体素级的循环里求值，多一层抽象就多一层开销，而且
 用不到的 API 只会增加 review 面积。
 

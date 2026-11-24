@@ -151,21 +151,35 @@ pub fn Mesh::edge_keys(self : Mesh) -> Array[Int64] {
 }
 
 ///|
-/// 水密：每条无向边恰好被 2 个三角形共享。
-pub fn Mesh::is_watertight(self : Mesh) -> Bool {
+/// 一次排序同时数出「唯一边数」与「开口边数」。
+///
+/// `is_watertight` / `open_edges` / `edge_count` / `euler` / `genus` 以前各自
+/// 排一次 `3F` 个 `Int64`，一次报告要好几次排序；合并成一个入口之后，
+/// 拓扑查询只排一次。
+fn Mesh::edge_tally(self : Mesh) -> (Int32, Int32) {
   let keys = self.edge_keys()
+  let mut edges = 0
+  let mut open = 0
   let mut i = 0
   while i < keys.length() {
     let mut j = i + 1
     while j < keys.length() && keys[j] == keys[i] {
       j = j + 1
     }
+    edges = edges + 1
     if j - i != 2 {
-      return false
+      open = open + 1
     }
     i = j
   }
-  true
+  (edges, open)
+}
+
+///|
+/// 水密：每条无向边恰好被 2 个三角形共享。
+pub fn Mesh::is_watertight(self : Mesh) -> Bool {
+  let (_, open) = self.edge_tally()
+  open == 0
 }
 
 ///|
@@ -175,20 +189,8 @@ pub fn Mesh::is_watertight(self : Mesh) -> Bool {
 /// `--clip` 这种故意裁剪的场景：裁剪出来的网格不该被当成可打印实体，但
 /// 开口的数量要说得出来，而不是只给一个 false。
 pub fn Mesh::open_edges(self : Mesh) -> Int32 {
-  let keys = self.edge_keys()
-  let mut count = 0
-  let mut i = 0
-  while i < keys.length() {
-    let mut j = i + 1
-    while j < keys.length() && keys[j] == keys[i] {
-      j = j + 1
-    }
-    if j - i != 2 {
-      count = count + 1
-    }
-    i = j
-  }
-  count
+  let (_, open) = self.edge_tally()
+  open
 }
 
 ///|
@@ -392,42 +394,192 @@ pub fn Mesh::is_manifold(self : Mesh) -> Bool {
 ///|
 /// 唯一边数。
 pub fn Mesh::edge_count(self : Mesh) -> Int32 {
-  let keys = self.edge_keys()
-  let mut count = 0
-  let mut i = 0
-  while i < keys.length() {
-    let mut j = i + 1
-    while j < keys.length() && keys[j] == keys[i] {
-      j = j + 1
-    }
-    count = count + 1
-    i = j
-  }
-  count
+  let (edges, _) = self.edge_tally()
+  edges
 }
 
 ///|
 /// 欧拉示性数 `V - E + F`。单个闭合曲面上等于 `2 - 2g`；`k` 个不相交的
 /// 闭合壳则是 `2k - 2Σgᵢ`（示性数对壳可加）。
 pub fn Mesh::euler(self : Mesh) -> Int32 {
-  self.vertex_count() - self.edge_count() + self.triangle_count()
+  let (edges, _) = self.edge_tally()
+  self.vertex_count() - edges + self.triangle_count()
 }
 
 ///|
-/// 亏格 `g = (2 - χ) / 2`。
+/// 亏格 `g = (2 - χ) / 2`，**只对单个闭合壳**有意义。
 ///
-/// 只对**单个闭合壳**是真正的亏格。多壳时返回值是 `1 - k + Σgᵢ`：`k` 个球
-/// 给出 `1 - k`，看起来像负数——所以这里把「不闭合 / 多壳」一并返回 `-1`
-/// （`χ` 为奇数说明不闭合，或顶点只被部分面共享），意义是「这个数为不了」，
-/// 不区分具体原因。要逐壳统计得先做连通分量拆分，本雏版不做。
+/// 不闭合、或壳数不为 1 时返回 `-1`，意思是「这个数为不了」，不区分具体
+/// 原因。这里必须真的数壳：只看 `χ` 是分不出来的——两个环面（各 χ = 0）
+/// 合起来 χ 也是 0，会被算成「单壳亏格 1」；球 + 环面 χ = 2，会被算成
+/// 「单壳亏格 0」。要逐壳亏格就 `shells()` 之后对每个壳单独问。
 pub fn Mesh::genus(self : Mesh) -> Int32 {
-  let chi = self.euler()
-  // 单壳闭合面的 χ 是偶数且不超过 2（球 2、环面 0、双环面 -2…）；
-  // χ > 2 只可能是多个壳叠在一起，此时 (2 - χ) / 2 为负，不是亏格。
+  let (edges, open) = self.edge_tally()
+  if open > 0 {
+    return -1
+  }
+  if self.shell_count() != 1 {
+    return -1
+  }
+  let chi = self.vertex_count() - edges + self.triangle_count()
   if chi % 2 != 0 || chi > 2 {
     return -1
   }
   (2 - chi) / 2
+}
+
+///|
+/// 每个三角形所属的连通壳编号（`0 .. shell_count-1`，按三角形首次出现的
+/// 顺序编号，因此同输入逐次可复现）。
+///
+/// 连通判据是**共享一条无向边**，不是共享顶点：两瓣实体只在一个顶点相触时
+/// 会被拆成两个壳，而不是并成一个——这与 `is_manifold()` 的顶点判据互补。
+fn Mesh::face_components(self : Mesh) -> Array[Int32] {
+  let f = self.triangle_count()
+  let ids : Array[Int32] = Array::make(f, -1)
+  if f == 0 {
+    return ids
+  }
+  let parent : Array[Int32] = Array::make(f, 0)
+  let mut i = 0
+  while i < f {
+    parent[i] = i
+    i = i + 1
+  }
+  let nv = self.vertex_count().to_int64()
+  let seen : @hashmap.HashMap[Int64, Int32] = @hashmap.HashMap(
+    [],
+    capacity=f * 2 + 8,
+  )
+  let mut t = 0
+  while t < f {
+    let a = self.indices[t * 3]
+    let b = self.indices[t * 3 + 1]
+    let c = self.indices[t * 3 + 2]
+    link_face(parent, seen, edge_key(a, b, nv), t)
+    link_face(parent, seen, edge_key(b, c, nv), t)
+    link_face(parent, seen, edge_key(c, a, nv), t)
+    t = t + 1
+  }
+  let label : @hashmap.HashMap[Int32, Int32] = @hashmap.HashMap([], capacity=f)
+  let mut count = 0
+  let mut k = 0
+  while k < f {
+    let r = uf_find(parent, k)
+    match label.get(r) {
+      Some(id) => ids[k] = id
+      None => {
+        label.set(r, count)
+        ids[k] = count
+        count = count + 1
+      }
+    }
+    k = k + 1
+  }
+  ids
+}
+
+///|
+fn link_face(
+  parent : Array[Int32],
+  seen : @hashmap.HashMap[Int64, Int32],
+  key : Int64,
+  t : Int32,
+) -> Unit {
+  match seen.get(key) {
+    Some(g) => {
+      let ra = uf_find(parent, g)
+      let rb = uf_find(parent, t)
+      if ra != rb {
+        parent[ra] = rb
+      }
+    }
+    None => seen.set(key, t)
+  }
+}
+
+///|
+/// 连通壳数。空网格为 0；多实体、或薄壁漏采把内腔也当成了实体时 `> 1`。
+pub fn Mesh::shell_count(self : Mesh) -> Int32 {
+  let ids = self.face_components()
+  let mut count = 0
+  for id in ids {
+    if id >= count {
+      count = id + 1
+    }
+  }
+  count
+}
+
+///|
+/// 拆成互不连通的壳，每壳是一个独立网格（顶点重排、索引重编）。
+///
+/// 顺序按「该壳里第一个三角形的原始下标」升序，所以同输入两次拆分结果逐位
+/// 相同。拆完之后 `genus()` 才逐壳有意义——整体 `genus()` 在多壳时给 -1。
+pub fn Mesh::shells(self : Mesh) -> Array[Mesh] {
+  let ids = self.face_components()
+  let f = self.triangle_count()
+  let mut count = 0
+  for id in ids {
+    if id >= count {
+      count = id + 1
+    }
+  }
+  let out : Array[Mesh] = []
+  let nv = self.vertex_count()
+  let mut s = 0
+  while s < count {
+    let remap : Array[Int32] = Array::make(nv, -1)
+    let positions : Array[Vec3] = []
+    let indices : Array[Int32] = []
+    let mut t = 0
+    while t < f {
+      if ids[t] == s {
+        let mut j = 0
+        while j < 3 {
+          let old = self.indices[t * 3 + j]
+          let mut idx = remap[old]
+          if idx < 0 {
+            idx = positions.length()
+            remap[old] = idx
+            positions.push(self.positions[old])
+          }
+          indices.push(idx)
+          j = j + 1
+        }
+      }
+      t = t + 1
+    }
+    if indices.length() > 0 {
+      out.push(Mesh::new(positions, indices))
+    }
+    s = s + 1
+  }
+  out
+}
+
+///|
+/// 体积最大的壳（按 `|volume|` 比，容忍朝向反了的情况）。空网格返回空网格。
+///
+/// 这是工程上最常用的一步：3D 打印里浮空的碎屑要么删掉、要么单独检查，
+/// 不能和主体混在同一个文件里。
+pub fn Mesh::largest_shell(self : Mesh) -> Mesh {
+  let parts = self.shells()
+  if parts.length() == 0 {
+    return Mesh::empty()
+  }
+  let mut best = parts[0]
+  let mut best_v = best.volume().abs()
+  let mut i = 1
+  while i < parts.length() {
+    let v = parts[i].volume().abs()
+    if v > best_v {
+      best = parts[i]
+      best_v = v
+    }
+    i = i + 1
+  }
+  best
 }
 
 ///|
@@ -467,4 +619,129 @@ pub fn Mesh::bounds(self : Mesh) -> Aabb {
     hi = hi.max(p)
   }
   Aabb::new(lo, hi)
+}
+
+///|
+/// 网格体检报告：一次算完拓扑与几何指标，`warnings` 放「需要人看一眼」的项。
+///
+/// 单独调 `is_watertight()` / `open_edges()` / `euler()` / `genus()` /
+/// `shell_count()` 会各自遍历一遍边表（每次 `O(F log F)` 排序），体检要的
+/// 是所有指标，所以给一个合并入口。`genus` 只在「闭合且单壳」时有意义，
+/// 否则为 `-1`（多壳时整体亏格没有定义）。
+pub(all) struct MeshAudit {
+  vertices : Int32
+  triangles : Int32
+  edges : Int32
+  open_edges : Int32
+  shells : Int32
+  euler : Int32
+  genus : Int32
+  watertight : Bool
+  manifold : Bool
+  volume : Double
+  area : Double
+  hash : UInt64
+  bounds : Aabb
+  warnings : Array[String]
+}
+
+///|
+/// JSON 数字：非有限值写 `null`，免得产出非法 JSON。
+fn json_num(v : Double) -> String {
+  if v == v && v.abs() <= 1.0e308 {
+    "\{v}"
+  } else {
+    "null"
+  }
+}
+
+///|
+/// 一次体检。`warnings` 里的判断都来自实测出的失败模式，不是泛泛的提醒：
+///
+/// - 开口：某条边的相邻面数不是 2（裁剪、域没包住实体、场有奇点）；
+/// - 非流形顶点：两瓣实体只在一个顶点相触（`is_watertight` 抓不到）；
+/// - 多壳：互不连通的壳多于 1 个。薄壁（壁厚小于 1~2 个体素）时采样会漏掉
+///   壁内的负区，把内腔的表面也当成实体边界，体积因此**偏大**而不是偏小
+///   （实测壁厚 0.2、体素 0.656 时体积是解析值的 29 倍）；
+/// - 体积非正：整体朝向反了。
+pub fn Mesh::audit(self : Mesh) -> MeshAudit {
+  let f = self.triangle_count()
+  let v = self.vertex_count()
+  let (edges, open) = self.edge_tally()
+  let shells = self.shell_count()
+  let euler = v - edges + f
+  let watertight = open == 0
+  let manifold = self.is_manifold()
+  let genus = if watertight && shells == 1 && euler % 2 == 0 && euler <= 2 {
+    (2 - euler) / 2
+  } else {
+    -1
+  }
+  let volume = self.volume()
+  let warnings : Array[String] = []
+  if f > 0 {
+    if !watertight {
+      warnings.push("开口：\{open} 条边的相邻面数不是 2")
+    }
+    if watertight && !manifold {
+      warnings.push("非流形顶点：有两瓣只在一个顶点相触")
+    }
+    if shells > 1 {
+      warnings.push(
+        "多壳：\{shells} 个互不连通的壳。内腔与多实体都会这样；若壁厚小于约 1 个体素，内腔表面可能被当成实体边界，体积会偏大（实测壁厚 0.2、体素 0.66 时是解析值的 29 倍）",
+      )
+    }
+    if volume <= 0.0 {
+      warnings.push("体积非正：网格朝向可能整体反了")
+    }
+  }
+  {
+    vertices: v,
+    triangles: f,
+    edges,
+    open_edges: open,
+    shells,
+    euler,
+    genus,
+    watertight,
+    manifold,
+    volume,
+    area: self.area(),
+    hash: self.hash(),
+    bounds: self.bounds(),
+    warnings,
+  }
+}
+
+///|
+/// 单行可解析的 JSON。`warnings` 是库自己生成的固定文案（不含引号与反斜杠），
+/// 所以直接拼接，不做转义。
+pub fn MeshAudit::to_json(self : MeshAudit) -> String {
+  let b = self.bounds
+  let mut out = "{\n"
+  out = out + "  \"vertices\": \{self.vertices},\n"
+  out = out + "  \"triangles\": \{self.triangles},\n"
+  out = out + "  \"edges\": \{self.edges},\n"
+  out = out + "  \"open_edges\": \{self.open_edges},\n"
+  out = out + "  \"shells\": \{self.shells},\n"
+  out = out + "  \"euler\": \{self.euler},\n"
+  out = out + "  \"genus\": \{self.genus},\n"
+  out = out + "  \"watertight\": \{self.watertight},\n"
+  out = out + "  \"manifold\": \{self.manifold},\n"
+  out = out + "  \"volume\": \{json_num(self.volume)},\n"
+  out = out + "  \"area\": \{json_num(self.area)},\n"
+  out = out + "  \"hash\": \{self.hash},\n"
+  out = out +
+    "  \"bounds\": {\"min\": [\{json_num(b.min.x)}, \{json_num(b.min.y)}, \{json_num(b.min.z)}], \"max\": [\{json_num(b.max.x)}, \{json_num(b.max.y)}, \{json_num(b.max.z)}]},\n"
+  out = out + "  \"warnings\": ["
+  let mut i = 0
+  while i < self.warnings.length() {
+    if i > 0 {
+      out = out + ", "
+    }
+    out = out + "\"" + self.warnings[i] + "\""
+    i = i + 1
+  }
+  out = out + "]\n}\n"
+  out
 }

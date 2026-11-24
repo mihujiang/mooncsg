@@ -111,6 +111,19 @@ pub fn Sdf::scale(self : Sdf, s : Double) -> Sdf {
 }
 
 ///|
+/// 用 3×3 矩阵旋转（`m` 的列是局部基，必须是正交矩阵，见
+/// `Mat3::is_orthonormal`）。
+///
+/// 这里不提供 `rotate(axis, angle)`：那需要 `sin` / `cos`，而这个 core 版本
+/// 没有三角函数，自己实现会引入跨后端的末位差异（网格指纹要求在
+/// wasm-gc / js / native 上逐位一致）。角度到矩阵的转换留给调用方，
+/// 转完可以用 `is_orthonormal` 自检——非正交矩阵不会报错，只会让距离场
+/// 被拉伸，体积与法线都会偏。
+pub fn Sdf::rotate(self : Sdf, m : Mat3) -> Sdf {
+  Rotate(self, m)
+}
+
+///|
 fn max3(v : Vec3) -> Double {
   let m = if v.x > v.y { v.x } else { v.y }
   if m > v.z {
@@ -286,19 +299,152 @@ pub fn Sdf::is_inside(self : Sdf, p : Vec3) -> Bool {
 }
 
 ///|
-/// 数值梯度（中心差分）指向距离增大方向，也就是实体外部。
+/// 符号函数，`0` 归到 `+1`（与 `abs()` 的对称性一致即可，零点本身测度为零）。
+fn sgn(v : Double) -> Double {
+  if v < 0.0 {
+    -1.0
+  } else {
+    1.0
+  }
+}
+
+///|
+/// 解析梯度：指向距离增大方向（实体外部），与数值梯度同向。
 ///
-/// 步长随坐标尺度放大，避免在远处把差分吃掉；这里只用 `+ - * / sqrt`，
+/// 返回 `None` 表示这个节点故意不给解析式（圆锥的帽/侧棱切换、平滑并的过渡
+/// 带），由 `gradient` 回退到中心差分。这么分工是因为这两处的解析式容易在
+/// 边界上写错，而错了不会报错、只会让法线偏一点。
+///
+/// 为什么值得写：中心差分一次要 6 次 `eval`，而网格化每个新顶点要 2 次投影
+/// 迭代 + 1 次存法线，等于 18 次额外求值；解析梯度把它降到 3 次以内。
+fn Sdf::gradient_analytic(self : Sdf, p : Vec3) -> Vec3? {
+  match self {
+    Sphere(c, _) => {
+      let q = p.sub(c)
+      let l = q.length()
+      if l <= 1.0e-12 {
+        Some(Vec3::new(0.0, 0.0, 1.0))
+      } else {
+        Some(q.div(l))
+      }
+    }
+    Box(c, half) => {
+      let q = p.sub(c)
+      let d = q.abs().sub(half)
+      if max3(d) > 0.0 {
+        // 外部：每个轴的超出量就是法向分量，方向由 q 的符号还原。
+        let m = d.max_zero()
+        let l = m.length()
+        if l <= 1.0e-12 {
+          Some(Vec3::new(0.0, 0.0, 1.0))
+        } else {
+          Some(Vec3::new(sgn(q.x) * m.x, sgn(q.y) * m.y, sgn(q.z) * m.z).div(l))
+        }
+      } else if d.x > d.y && d.x > d.z {
+        Some(Vec3::new(sgn(q.x), 0.0, 0.0))
+      } else if d.y > d.z {
+        Some(Vec3::new(0.0, sgn(q.y), 0.0))
+      } else {
+        Some(Vec3::new(0.0, 0.0, sgn(q.z)))
+      }
+    }
+    Plane(n, _) => Some(n)
+    Cylinder(c, r, h) => {
+      let q = p.sub(c)
+      let rr = len2(q.x, q.y)
+      let radial = rr - r
+      let axial = (if q.z < 0.0 { -q.z } else { q.z }) - h
+      let dir = if rr <= 1.0e-12 {
+        Vec3::new(1.0, 0.0, 0.0)
+      } else {
+        Vec3::new(q.x / rr, q.y / rr, 0.0)
+      }
+      let up = Vec3::new(0.0, 0.0, sgn(q.z))
+      if radial < 0.0 && axial < 0.0 {
+        // 内部：最近的那个面
+        if radial > axial {
+          Some(dir)
+        } else {
+          Some(up)
+        }
+      } else if radial > 0.0 && axial > 0.0 {
+        let v = dir.mul(radial).add(up.mul(axial))
+        let l = v.length()
+        if l <= 1.0e-12 {
+          Some(dir)
+        } else {
+          Some(v.div(l))
+        }
+      } else if radial > 0.0 {
+        Some(dir)
+      } else {
+        Some(up)
+      }
+    }
+    Torus(c, big, _) => {
+      let q = p.sub(c)
+      let rr = len2(q.x, q.y)
+      let a = rr - big
+      let dx = if rr <= 1.0e-12 { 1.0 } else { q.x / rr }
+      let dy = if rr <= 1.0e-12 { 0.0 } else { q.y / rr }
+      let v = Vec3::new(dx * a, dy * a, q.z)
+      let l = v.length()
+      if l <= 1.0e-12 {
+        Some(Vec3::new(0.0, 0.0, 1.0))
+      } else {
+        Some(v.div(l))
+      }
+    }
+    Cone(_, _, _, _) => None
+    Capsule(c, _, h) => {
+      let q = p.sub(c)
+      let zc = if q.z < -h { -h } else if q.z > h { h } else { q.z }
+      let d = Vec3::new(q.x, q.y, q.z - zc)
+      let l = d.length()
+      if l <= 1.0e-12 {
+        Some(Vec3::new(0.0, 0.0, 1.0))
+      } else {
+        Some(d.div(l))
+      }
+    }
+    Translate(s, t) => s.gradient_analytic(p.sub(t))
+    Rotate(s, m) =>
+      match s.gradient_analytic(m.transpose().mul_vec(p)) {
+        Some(g) => Some(m.mul_vec(g))
+        None => None
+      }
+    Scale(s, k) =>
+      if k <= 0.0 {
+        Some(Vec3::new(0.0, 0.0, 1.0))
+      } else {
+        s.gradient_analytic(p.div(k))
+      }
+    Union(_, _) => None
+    Intersect(_, _) => None
+    Subtract(_, _) => None
+    SmoothUnion(_, _, _) => None
+  }
+}
+
+///|
+/// 法线：解析梯度优先，没有解析式的节点回退到中心差分（数值梯度）。
+///
+/// 步长随坐标尺度放大，避免在远处把差分吃掉；只用 `+ - * / sqrt`，
 /// 不引入三角函数，保证同一输入的梯度在任何后端一致。
 pub fn Sdf::gradient(self : Sdf, p : Vec3) -> Vec3 {
-  let h = 1.0e-5 * (1.0 + p.length())
-  let dx = self.eval(p.add(Vec3::new(h, 0.0, 0.0))) -
-    self.eval(p.sub(Vec3::new(h, 0.0, 0.0)))
-  let dy = self.eval(p.add(Vec3::new(0.0, h, 0.0))) -
-    self.eval(p.sub(Vec3::new(0.0, h, 0.0)))
-  let dz = self.eval(p.add(Vec3::new(0.0, 0.0, h))) -
-    self.eval(p.sub(Vec3::new(0.0, 0.0, h)))
-  Vec3::new(dx, dy, dz).div(2.0 * h)
+  match self.gradient_analytic(p) {
+    Some(g) => g
+    None => {
+      let h = 1.0e-5 * (1.0 + p.length())
+      let dx = self.eval(p.add(Vec3::new(h, 0.0, 0.0))) -
+        self.eval(p.sub(Vec3::new(h, 0.0, 0.0)))
+      let dy = self.eval(p.add(Vec3::new(0.0, h, 0.0))) -
+        self.eval(p.sub(Vec3::new(0.0, h, 0.0)))
+      let dz = self.eval(p.add(Vec3::new(0.0, 0.0, h))) -
+        self.eval(p.sub(Vec3::new(0.0, 0.0, h)))
+      Vec3::new(dx, dy, dz).div(2.0 * h)
+    }
+  }
 }
 
 ///|

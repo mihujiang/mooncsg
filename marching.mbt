@@ -73,11 +73,16 @@ fn Builder::new(
   iterations : Int32,
   slots : UInt64,
 ) -> Builder {
+  // 顶点数的量级是「表面积 / h²」，约 `slots^0.66`；按 `slots / 8` 估容量
+  // 对 32³~256³ 都够用，避免大网格上反复 rehash。容量只影响哈希桶数量，
+  // 不影响插入顺序之外的结果（这里只做 get/set）。
+  let estimate = slots / 8UL
+  let cap = if estimate > 1024UL { estimate.to_int() } else { 1024 }
   {
     sdf,
     positions: [],
     normals: [],
-    seen: @hashmap.HashMap([], capacity=1024),
+    seen: @hashmap.HashMap([], capacity=cap),
     project,
     iterations,
     slots,
@@ -453,20 +458,21 @@ fn sample_field(
   let nx1 = nx + 1
   let ny1 = ny + 1
   let nz1 = nz + 1
-  let field : Array[Double] = []
+  // 预分配：这个数组是网格化里最大的一块（8 字节/格点），用 push 增长会在
+  // 百万格点量级上反复 copy。
+  let field : Array[Double] = Array::make(nx1 * ny1 * nz1, 0.0)
   let mut zi = 0
   while zi < nz1 {
     let mut yi = 0
     while yi < ny1 {
       let mut xi = 0
       while xi < nx1 {
-        field.push(
-          sdf.eval(
-            Vec3::new(
-              bounds.min.x + xi.to_double() * h,
-              bounds.min.y + yi.to_double() * h,
-              bounds.min.z + zi.to_double() * h,
-            ),
+        let slot = xi + nx1 * (yi + ny1 * zi)
+        field[slot] = sdf.eval(
+          Vec3::new(
+            bounds.min.x + xi.to_double() * h,
+            bounds.min.y + yi.to_double() * h,
+            bounds.min.z + zi.to_double() * h,
           ),
         )
         xi = xi + 1
@@ -583,8 +589,10 @@ pub fn mesh_unchecked(sdf : Sdf, bounds : Aabb, opts : MeshOptions) -> Mesh {
 ///
 /// 它不保证的（属于采样精度或输入合法性，不是拓扑问题）：
 ///
-/// - 壁厚小于 2 个体素的薄壳：两个格点可能同号，整片壳被漏掉，结果是空
-///   网格（`NoSurface`）或体积明显偏小；
+/// - 壁厚小于约 1 个体素的薄壳：格点采样会漏掉壁内的负区，内腔表面被当成
+///   实体边界，网格**仍然水密**，但体积会偏大——实测壁厚 0.2 / 体素 0.66 时
+///   体积是解析值的 29 倍，壁厚 0.6 时误差 0.1%。这个错误 `NotClosed` 兜不住，
+///   要靠 `Mesh::audit()` 的壳数告警，或与解析体积对拍；
 /// - `|∇f|` 明显偏离 1 的非精确 SDF：体积与法线有偏差，拓扑仍闭合；
 /// - 自交实体（如管半径大于母线半径的环面）：输出闭合但不可打印。
 pub fn mesh_checked(
@@ -602,24 +610,22 @@ pub fn mesh_checked(
   let (h, nx, ny, nz) = plan_grid(size, opts.resolution)
   let field = sample_field(sdf, bounds, h, nx, ny, nz)
   match check_field(bounds, h, nx, ny, nz, field) {
-    Some(e) => Err(e)
-    None => {
-      let m = assemble_mesh(sdf, bounds, h, nx, ny, nz, field, opts)
-      if m.is_empty() {
-        Err(NoSurface)
-      } else {
-        // 后置自检：前面四条只是「闭合」的充分性论证，这里把结论本身直接
-        // 验一遍。多花一次 O(F log F) 的边排序，换来「通过即闭合」不依赖
-        // 论证的正确性——两者不一致时落到 NotClosed，而不是放行一个开口
-        // 网格。相切、奇点、非流形之类的病态输入由这一层兜住。
-        let open = m.open_edges()
-        if open > 0 {
-          Err(NotClosed(open))
-        } else {
-          Ok(m)
-        }
-      }
-    }
+    Some(e) => return Err(e)
+    None => ()
+  }
+  let m = assemble_mesh(sdf, bounds, h, nx, ny, nz, field, opts)
+  if m.is_empty() {
+    return Err(NoSurface)
+  }
+  // 后置自检：前面四条只是「闭合」的充分性论证，这里把结论本身直接
+  // 验一遍。多花一次 O(F log F) 的边排序，换来「通过即闭合」不依赖
+  // 论证的正确性——两者不一致时落到 NotClosed，而不是放行一个开口
+  // 网格。相切、奇点、非流形之类的病态输入由这一层兜住。
+  let open = m.open_edges()
+  if open > 0 {
+    Err(NotClosed(open))
+  } else {
+    Ok(m)
   }
 }
 

@@ -267,7 +267,7 @@ test "mesh hash is stable across backends" {
   )
   // 该常量在 native / js / wasm-gc 三个后端都必须一致；任一后端出现
   // 不同的浮点结果或不同的遍历顺序，这个断言就会炸。
-  assert_eq(m.hash(), 7885752854646016839UL)
+  assert_eq(m.hash(), 1567319603017277365UL)
 }
 
 ///|
@@ -299,6 +299,113 @@ test "two disjoint shells make genus undecidable" {
   // 两个闭合壳：χ = 2 + 2 = 4，(2 - χ) / 2 = -1 不是亏格，所以给 -1。
   assert_eq(m.euler(), 4)
   assert_eq(m.genus(), -1)
+  assert_eq(m.shell_count(), 2)
+  let parts = m.shells()
+  assert_eq(parts.length(), 2)
+  let want = 4.0 / 3.0 * 3.141592653589793 * 125.0
+  for p in parts {
+    assert_true(p.is_watertight())
+    assert_eq(p.genus(), 0)
+    assert_true(rel_err(p.volume(), want) < 0.01)
+  }
+  // 两个等大的壳：最大的那个也是合法单壳网格
+  assert_true(m.largest_shell().is_watertight())
+}
+
+///|
+test "two disjoint tori are two shells each of genus one" {
+  // χ 分不出多壳：两个环面各 χ = 0，合起来还是 0，只看 χ 会算成「单壳亏格 1」。
+  let left = @mooncsg.Sdf::torus(8.0, 3.0).at(
+    @mooncsg.Vec3::new(-15.0, 0.0, 0.0),
+  )
+  let right = @mooncsg.Sdf::torus(8.0, 3.0).at(
+    @mooncsg.Vec3::new(15.0, 0.0, 0.0),
+  )
+  let b = @mooncsg.Aabb::from_center_half(
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::new(26.0, 11.0, 3.0),
+  ).expand(0.5)
+  let m = @mooncsg.mesh(left.union(right), b, @mooncsg.MeshOptions::new(64))
+  assert_eq(m.euler(), 0)
+  assert_eq(m.shell_count(), 2)
+  assert_eq(m.genus(), -1)
+  let parts = m.shells()
+  assert_eq(parts.length(), 2)
+  let want = 2.0 * 3.141592653589793 * 3.141592653589793 * 8.0 * 9.0
+  for p in parts {
+    assert_eq(p.genus(), 1)
+    assert_true(rel_err(p.volume(), want) < 0.02)
+  }
+}
+
+///|
+test "largest shell drops floating debris" {
+  let ball = @mooncsg.Sdf::sphere(10.0)
+  let debris = @mooncsg.Sdf::sphere(2.0).at(@mooncsg.Vec3::new(30.0, 0.0, 0.0))
+  let b = @mooncsg.Aabb::new(
+    @mooncsg.Vec3::splat(-11.0),
+    @mooncsg.Vec3::new(33.0, 11.0, 11.0),
+  )
+  let m = @mooncsg.mesh(ball.union(debris), b, @mooncsg.MeshOptions::new(48))
+  assert_eq(m.shell_count(), 2)
+  let big = m.largest_shell()
+  assert_eq(big.shell_count(), 1)
+  let want = 4.0 / 3.0 * 3.141592653589793 * 1000.0
+  assert_true(rel_err(big.volume(), want) < 0.01)
+}
+
+///|
+test "audit reports topology and no warnings for a clean solid" {
+  let m = @mooncsg.mesh(
+    @mooncsg.Sdf::sphere(10.0),
+    sphere_bounds(10.0),
+    @mooncsg.MeshOptions::new(32),
+  )
+  let a = m.audit()
+  assert_eq(a.shells, 1)
+  assert_eq(a.euler, 2)
+  assert_eq(a.genus, 0)
+  assert_eq(a.open_edges, 0)
+  assert_true(a.watertight)
+  assert_true(a.manifold)
+  assert_eq(a.warnings.length(), 0)
+  assert_true(a.volume > 0.0)
+  assert_true(a.area > 0.0)
+  let j = a.to_json()
+  assert_true(j.contains("\"shells\": 1"))
+  assert_true(j.contains("\"genus\": 0"))
+  assert_true(j.contains("\"watertight\": true"))
+  assert_true(j.contains("\"warnings\": []"))
+}
+
+///|
+test "audit warns about multiple shells and open edges" {
+  // 多壳：体积很大的球 + 远处小球
+  let ball = @mooncsg.Sdf::sphere(10.0)
+  let debris = @mooncsg.Sdf::sphere(2.0).at(@mooncsg.Vec3::new(30.0, 0.0, 0.0))
+  let b = @mooncsg.Aabb::new(
+    @mooncsg.Vec3::splat(-11.0),
+    @mooncsg.Vec3::new(33.0, 11.0, 11.0),
+  )
+  let m = @mooncsg.mesh(ball.union(debris), b, @mooncsg.MeshOptions::new(48))
+  let a = m.audit()
+  assert_eq(a.shells, 2)
+  assert_eq(a.genus, -1)
+  assert_true(a.warnings.length() >= 1)
+  assert_true(a.to_json().contains("\"shells\": 2"))
+  // 开口：故意把球切一半
+  let clipped = @mooncsg.mesh_unchecked(
+    @mooncsg.Sdf::sphere(10.0),
+    @mooncsg.Aabb::new(
+      @mooncsg.Vec3::new(-10.5, -10.5, -10.5),
+      @mooncsg.Vec3::new(0.0, 10.5, 10.5),
+    ),
+    @mooncsg.MeshOptions::new(32),
+  )
+  let ca = clipped.audit()
+  assert_true(!ca.watertight)
+  assert_true(ca.open_edges > 0)
+  assert_true(ca.warnings.length() >= 1)
 }
 
 ///|
@@ -375,6 +482,34 @@ test "open surface is not manifold" {
   let m = @mooncsg.Mesh::new(positions, indices)
   assert_true(!m.is_watertight())
   assert_true(!m.is_manifold())
+}
+
+///|
+/// 已知限制的可执行记录：壁厚小于 1 个体素时，格点采样漏掉壁内负区，内腔
+/// 表面被当成实体边界——体积**偏大**（不是偏小），而网格仍然水密、仍然流形。
+/// 哪天改成自适应细分或加薄壁检测，这条会红，提醒同步文档与 audit 告警。
+test "thin wall inflates volume while staying watertight" {
+  let outer = @mooncsg.Sdf::box(@mooncsg.Vec3::splat(10.0))
+  let inner = @mooncsg.Sdf::box(@mooncsg.Vec3::splat(9.8))
+  let b = @mooncsg.Aabb::from_center_half(
+    @mooncsg.Vec3::zero(),
+    @mooncsg.Vec3::splat(10.0),
+  ).expand(0.5)
+  let side = 2.0 * 9.8
+  let want = 8000.0 - side * side * side
+  let m = @mooncsg.mesh(outer.subtract(inner), b, @mooncsg.MeshOptions::new(32))
+  assert_true(m.is_watertight())
+  assert_true(m.is_manifold())
+  assert_eq(m.shell_count(), 2)
+  assert_true(m.volume() > 10.0 * want)
+  assert_true(m.audit().warnings.length() >= 1)
+  // 同一形状把体素压到壁厚以下（res 128 时 h ≈ 0.16）就回到正轨。
+  let fine = @mooncsg.mesh(
+    outer.subtract(inner),
+    b,
+    @mooncsg.MeshOptions::new(128),
+  )
+  assert_true(rel_err(fine.volume(), want) < 0.05)
 }
 
 ///|

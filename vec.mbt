@@ -210,6 +210,21 @@ pub fn Mat3::mul_vec(self : Mat3, v : Vec3) -> Vec3 {
 }
 
 ///|
+/// 是否正交（`MᵀM = I`，逐项容差 `eps`）。
+///
+/// `Sdf::rotate` 只对正交矩阵保证距离场仍是距离场：非正交矩阵会把空间拉伸，
+/// `eval` 的值不再等于到曲面的欧氏距离，投影与法线跟着偏，而且不会报错。
+/// 自己拼矩阵之后用它验一下，代价是 6 次点积（18 次乘加）。
+pub fn Mat3::is_orthonormal(self : Mat3, eps : Double) -> Bool {
+  (self.c0.dot(self.c0) - 1.0).abs() <= eps &&
+  (self.c1.dot(self.c1) - 1.0).abs() <= eps &&
+  (self.c2.dot(self.c2) - 1.0).abs() <= eps &&
+  self.c0.dot(self.c1).abs() <= eps &&
+  self.c0.dot(self.c2).abs() <= eps &&
+  self.c1.dot(self.c2).abs() <= eps
+}
+
+///|
 /// 转置：旋转的逆。SDF 变换里要用它把世界坐标拉回局部坐标。
 pub fn Mat3::transpose(self : Mat3) -> Mat3 {
   {
