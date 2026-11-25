@@ -435,3 +435,56 @@ test "gradient is unit length and advances distance one-to-one" {
     }
   }
 }
+
+///|
+test "gradient falls back to central differences for cone and booleans" {
+  // 圆锥的帽/侧棱切换、以及布尔节点都给不出闭式（`gradient_analytic` 返回
+  // `None`），走中心差分。差分有 1e-5 量级的截断误差，所以判据比解析梯度松
+  // 一档：模长与「走 t 变 t」都只卡到 1e-6。
+  let cone = @mooncsg.Sdf::cone(3.0, 6.0, 8.0)
+  let two_balls = @mooncsg.Sdf::sphere(10.0).union(
+    @mooncsg.Sdf::sphere(10.0).at(@mooncsg.Vec3::new(30.0, 0.0, 0.0)),
+  )
+  // 探针都选在光滑处：圆锥轴线下方 / 上方各离端面 1、4 个单位，两球各自的正上方。
+  let shapes : Array[@mooncsg.Sdf] = [cone, cone, two_balls, two_balls]
+  let probes : Array[@mooncsg.Vec3] = [
+    @mooncsg.Vec3::new(0.0, 0.0, -9.0),
+    @mooncsg.Vec3::new(0.0, 0.0, 12.0),
+    @mooncsg.Vec3::new(0.0, 0.0, 15.0),
+    @mooncsg.Vec3::new(30.0, 0.0, -15.0),
+  ]
+  let step = 0.05
+  let mut i = 0
+  while i < shapes.length() {
+    let sdf = shapes[i]
+    let p = probes[i]
+    let g = sdf.gradient(p)
+    let len = g.length()
+    assert_true((len - 1.0).abs() < 1.0e-6)
+    let n = g.div(len)
+    let err = (sdf.eval(p.add(n.mul(step))) - (sdf.eval(p) + step)).abs()
+    assert_true(err < 1.0e-6)
+    i = i + 1
+  }
+}
+
+///|
+test "non-orthonormal rotate silently distorts the distance field" {
+  // 这不是 bug 而是约定：`rotate` 只对正交矩阵保证距离语义。非正交时求值照常
+  // 返回「局部空间里的距离」，只是不再是欧氏距离，而且不报错。把这条事实钉住：
+  // 谁日后给它加 panic 或断言，这条测试会红，逼着同步文档与 release notes。
+  let stretched = @mooncsg.Mat3::from_columns(
+    @mooncsg.Vec3::new(2.0, 0.0, 0.0),
+    @mooncsg.Vec3::new(0.0, 1.0, 0.0),
+    @mooncsg.Vec3::new(0.0, 0.0, 1.0),
+  )
+  assert_true(!stretched.is_orthonormal(1.0e-12))
+  let ball = @mooncsg.Sdf::sphere(5.0).rotate(stretched)
+  // x 轴被拉伸两倍：(10,0,0) 到球面的欧氏距离是 5，eval 给的是 20 - 5 = 15。
+  let p = @mooncsg.Vec3::new(10.0, 0.0, 0.0)
+  assert_true((ball.eval(p) - 15.0).abs() < 1.0e-12)
+  assert_true((ball.eval(p) - (p.length() - 5.0)).abs() > 1.0)
+  // y 轴没被拉伸，欧氏距离照旧。
+  let q = @mooncsg.Vec3::new(0.0, 10.0, 0.0)
+  assert_true((ball.eval(q) - 5.0).abs() < 1.0e-12)
+}

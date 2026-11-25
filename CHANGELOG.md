@@ -2,6 +2,42 @@
 
 按里程碑记录，每条都挂 commit。版本号按 mooncakes 的 0.x 规则走。
 
+## 0.1.10 — 2026-11-25
+
+没有改几何算法，只有三类收尾：测试盲区、性能基线、CI 工具链。
+
+### 测试
+
+- `guard_check.mjs` 加两条 `--audit` 场景（6 → 8 条）：正常球断言 stdout 是
+  **纯 JSON**（整体 `JSON.parse`，混进任何指标行都会失败）且 `shells` / `euler`
+  / `genus` / `watertight` / `manifold` / `warnings` 自洽；裁剪网格断言
+  `watertight=false` 且 `warnings` 非空。此前 CLI 的 `--audit` 只有
+  `audit().to_json()` 的单元测试，没人验「stdout 只有 JSON」这层约定。
+- `sdf_test.mbt`：梯度**回退路径**（圆锥、两球并集 ⇒ `gradient_analytic` 返回
+  `None`）的模长与「走 `t` 变 `t`」按 1e-6 断言；非正交 `rotate` 的静默失真钉成
+  测试（x 轴拉伸两倍后 `eval` 与欧氏距离差 > 1），谁日后给它加 panic 都会红。
+- `mesh_test.mbt`：空网格的 `shell_count` / `shells` / `largest_shell`、只共一个
+  顶点的两个三角形拆成 2 壳且各壳顶点重编到 3 个、非有限体积写成 JSON `null`
+  （测试用 1e308 坐标让叉积溢出成 Inf，正好走 `json_num` 的另一条分支）。
+- 测试块 63 → 66。
+
+### 文档
+
+- README 性能表按 0.1.9 之后的代码重测，快 30–50 %：wasm-gc 球 32 由 13.9 →
+  8.1 ms、球 256 由 1419.9 → 1112.8 ms；js 同档 35.2 → 24.7 / 3270.0 →
+  2747.7 ms。表里注明测量版本，跨版本可比、跨机器不可比。
+- README 的 guard check 实测表补两条 `--audit` 场景（6 → 8 行）。
+
+### 工程
+
+- **CI 冻结工具链**：原本想按版本号固定，实测发现不可行——CDN 只提供
+  `binaries/latest/...`，带版本号的路径一律 403（0.1.20261119、0.1.20261021
+  都试过），安装脚本的 `[VERSION]` 参数实际只能填 `latest`。改为用
+  `actions/cache` 缓存 `~/.moon`，`TOOLCHAIN_STAMP: "2026-11-25"` 是缓存键的一
+  段，**改日期即升级**：键变 → 重装 latest → 存新缓存。`pages.yml` 同键同值。
+  动机是 0.1.6：上游新增弃用诊断让 `--deny-warn` 在零代码改动时变红。缓存在
+  7 天不活跃后被清理，那时回到 latest，版本号会打在 notice 里。
+
 ## 0.1.9 — 2026-11-24
 
 ### Added

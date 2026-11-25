@@ -27,6 +27,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 工具链缓存的键，与 ci.yml 的 TOOLCHAIN_STAMP 保持一致（那里写了为什么
+    # 只能缓存、不能按版本号钉；升级时两边一起改日期）。
+    env:
+      TOOLCHAIN_STAMP: "2026-11-25"
     steps:
       - uses: actions/checkout@v4
 
@@ -34,10 +38,24 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Cache MoonBit toolchain
+        id: moon-cache
+        uses: actions/cache@v4
+        with:
+          # 与 ci.yml 同一份列表与键；不含 registry/ 与 credentials.json。
+          path: |
+            ~/.moon/bin
+            ~/.moon/lib
+            ~/.moon/include
+            ~/.moon/share
+          key: moon-${{ runner.os }}-${{ env.TOOLCHAIN_STAMP }}
+
       - name: Install MoonBit
-        run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
-          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+        if: steps.moon-cache.outputs.cache-hit != 'true'
+        run: curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- latest
+
+      - name: Add MoonBit to PATH
+        run: echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
       # 构建 wasm 并复制到 examples/web/web.wasm（该文件不进仓库，见 .gitignore）。
       - name: build wasm

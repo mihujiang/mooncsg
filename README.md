@@ -42,7 +42,7 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 
 ## 安装
 
-已发布到 mooncakes（`weopqrst/mooncsg@0.1.9`）：
+已发布到 mooncakes（`weopqrst/mooncsg@0.1.10`）：
 
 ```bash
 moon add weopqrst/mooncsg
@@ -52,7 +52,7 @@ moon add weopqrst/mooncsg
 
 ```moonbit
 import {
-  "weopqrst/mooncsg@0.1.9",
+  "weopqrst/mooncsg@0.1.10",
 }
 ```
 
@@ -61,7 +61,7 @@ import {
 ## 快速开始
 
 ```bash
-moon test                 # 63 个 test 块，wasm-gc / js / native 三后端都要跑
+moon test                 # 66 个 test 块，wasm-gc / js / native 三后端都要跑
 moon run examples/demo    # 盒减球，打印体积/面积/拓扑
 moon run examples/bench --release   # 网格化耗时基线
 moon check --deny-warn
@@ -123,12 +123,16 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 
 | 用例 | 三角形 | 实际格点 | wasm-gc | js |
 | --- | --- | --- | --- | --- |
-| 球 r=10，请求 32 | 26280 | 32³ | 13.9 ms | 35.2 ms |
-| 球 r=10，请求 64 | 104688 | 64³ | 68.3 ms | 175.0 ms |
-| 立方体 40³ 挖球 r=24，请求 48 | 107280 | 48³ | 90.7 ms | 233.5 ms |
-| 环面 R=8 r=3，请求 48 | 36172 | 48×48×15 | 20.6 ms | 45.3 ms |
-| 球 r=25，请求 128 | 443736 | 128³ | 404.5 ms | 981.1 ms |
-| 球 r=25，请求 256 | 1135968 | **205³**（被收窄） | 1419.9 ms | 3270.0 ms |
+| 球 r=10，请求 32 | 26280 | 32³ | 8.1 ms | 24.7 ms |
+| 球 r=10，请求 64 | 104688 | 64³ | 44.6 ms | 125.0 ms |
+| 立方体 40³ 挖球 r=24，请求 48 | 107280 | 48³ | 82.0 ms | 211.7 ms |
+| 环面 R=8 r=3，请求 48 | 36172 | 48×48×15 | 10.5 ms | 26.7 ms |
+| 球 r=25，请求 128 | 443736 | 128³ | 300.8 ms | 771.4 ms |
+| 球 r=25，请求 256 | 1135968 | **205³**（被收窄） | 1112.8 ms | 2747.7 ms |
+
+本表 2026-11-25 重测（0.1.10），比上一轮实测快 30–50 %——0.1.9 把场数组改成
+预分配、顶点哈希按格点数估容量是主因。同一台机器的同一轮实测，跨版本比较有意
+义，跨机器不要比。
 
 后两行用 `moon run examples/bench --release -- big` 才跑（默认不跑，js 后端
 那两档要几秒，塞进 CI 会把 bench 这条 step 拖成分钟级）。
@@ -189,11 +193,13 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | 域与实体完全不重叠 | 拒绝 `NoSurface`，不把空网格当成功 |
 | 退化参数（`scale(0)`、NaN 半径） | 采样到 Inf/NaN ⇒ 拒绝 `NonFiniteField` |
 
-实测（`node tools/guard_check.mjs`，CI 里的第 13 项门禁）：
+实测（`node tools/guard_check.mjs`，CI 里的第 13 项门禁，8 个场景）：
 
 | 场景 | 退出码 | 关键输出 |
 | --- | --- | --- |
 | 球 r=10，自动采样域 | 0 | `watertight: true`、`open_edges: 0` |
+| 同一球加 `--audit` | 0 | stdout 是**纯 JSON**（可整体 `JSON.parse`），`shells: 1`、`warnings: []` |
+| 裁剪网格加 `--audit` | 0 | `watertight: false`，`warnings` 非空 |
 | 半空间，无域 | 1 | 没有有限包围盒，提示用 `--bounds` |
 | 半空间 + 有界域 | 1 | 采样域被实体穿过：边界点 `(-10,-10,-10)` 场值 `-10` |
 | 域小于实体（裁一半） | 1 | 采样域被实体穿过：场值 `-0.015` |
@@ -242,6 +248,9 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | `audit()` 对干净实体零告警、对多壳与开口给告警，JSON 字段与实测一致 | `mesh_test.mbt` |
 | 壁厚小于 1 个体素时体积偏大但仍水密；同形状加密后回到 5 % 以内 | `mesh_test.mbt` |
 | 矩阵旋转的矩阵正交性自检：旋转阵为真，拉伸 / 剪切 / 零矩阵为假 | `sdf_test.mbt` |
+| 梯度没有闭式的节点（圆锥 / 布尔组合）回退中心差分后，模长与「走 `t` 变 `t`」仍成立（1e-6） | `sdf_test.mbt` |
+| 非正交 `rotate` 不报错但确实失真（x 轴拉伸两倍后 `eval` 与欧氏距离差 > 1） | `sdf_test.mbt` |
+| 空网格的 `shell_count` / `shells` / `largest_shell`、拆分后每壳顶点重编、非有限体积写成 JSON `null` | `mesh_test.mbt` |
 | `mesh_checked` 对相切 / 裁剪 / 空域 / 退化域 / 非有限场值分别返回对应错误 | `marching_test.mbt` |
 | 60 个随机实体在 `bounds().expand(0.5)` 下全部闭合、`open_edges == 0` | `marching_test.mbt` |
 | 两球外切后的并集仍闭合（体积误差 0.8 %），与「相切采样域必须拒绝」并列 | `marching_test.mbt` |
@@ -253,11 +262,19 @@ Node 24（wasm-gc 与 js 都跑在 V8 上）。
 | 截断的二进制 STL 返回 `None` 而不是越界 | `export_test.mbt` |
 | wasm 验收壳 4/4 通过（Node 与浏览器同一份 wasm） | `tools/wasm_check.mjs` |
 | CLI 边界语义：正常输入 exit 0 且闭合；半空间 / 裁剪 / 空域 exit ≠ 0；`--clip` 声明开口 | `tools/guard_check.mjs` |
+| `--audit` 的 stdout 是纯 JSON、字段自洽，裁剪网格带告警 | `tools/guard_check.mjs` |
 | 全部验收项一条命令跑完（13 项，含边界语义与体积对拍） | `tools/acceptance.mjs` |
 
 `tools/oracle.py` 用 Python 标准库手算解析值，`tools/volume_check.mjs` 把它和
 `cmd/main --stats` 的实测体积逐组比阈值——只跑 oracle.py 没意义（它打印完就
 exit 0），所以 CI 里跑的是后者，超差直接红。
+
+`moon` 工具链没法按版本号钉：CDN 只提供 `binaries/latest/...`，带版本号的路径
+一律 403（实测 0.1.20261119、0.1.20261021 都是）。所以 CI 用 `actions/cache` 把
+装到的那份 `~/.moon` 缓存住，`TOOLCHAIN_STAMP` 改日期就是升级（键变 → 重装
+latest → 存新缓存）。动机是 0.1.6：上游新增的弃用诊断会在没有代码改动时把
+`--deny-warn` 打红。缓存在 7 天不活跃后被清掉，那时会自动回到 latest，版本号
+变化会打在 notice 里。
 
 ## 设计要点
 

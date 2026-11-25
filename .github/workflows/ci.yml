@@ -7,6 +7,16 @@ on:
   pull_request:
   workflow_dispatch:
 
+# 工具链：CDN 只提供 `binaries/latest/...`（带版本号的路径一律 403，实测
+# 0.1.20261119 / 0.1.20261021 都是），所以没法按版本号钉死，只能把「装到的那
+# 一份」缓存住。**改下面这个日期就是升级动作**：缓存键变化 → 重新装 latest →
+# 存成新缓存。
+# 为什么要冻结：上游新增的弃用诊断会让 `--deny-warn` 在零代码改动时变红
+# （0.1.6 就是这么红的）。缓存 7 天不活跃会被清掉，那时自动回到 latest——
+# 版本号变化会以 notice 打出来，不静默。
+env:
+  TOOLCHAIN_STAMP: "2026-11-25"
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,16 +27,33 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Cache MoonBit toolchain
+        id: moon-cache
+        uses: actions/cache@v4
+        with:
+          # 只缓存工具链本身：`registry/`（下载缓存）不进来，`credentials.json`
+          # 是 moon home 根下的文件，也不在列表里——别让它有机会进缓存。
+          path: |
+            ~/.moon/bin
+            ~/.moon/lib
+            ~/.moon/include
+            ~/.moon/share
+          key: moon-${{ runner.os }}-${{ env.TOOLCHAIN_STAMP }}
+
       - name: Install MoonBit
-        run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
-          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+        if: steps.moon-cache.outputs.cache-hit != 'true'
+        run: curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- latest
+
+      # 命中缓存时不会执行上一步，PATH 得单独加；同一 step 里追加 GITHUB_PATH
+      # 对当前 step 不生效，所以必须是独立 step。
+      - name: Add MoonBit to PATH
+        run: echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
       - name: moon version
         run: |
           v=$(moon version --all 2>&1 | tr '\n' ' ')
           printf '%s\n' "$v"
-          echo "::notice::moon: $v"
+          echo "::notice::moon: $v  (stamp=$TOOLCHAIN_STAMP, cache-hit=${{ steps.moon-cache.outputs.cache-hit }})"
 
       - name: check
         run: |

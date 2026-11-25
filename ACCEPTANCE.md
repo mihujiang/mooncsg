@@ -1,6 +1,6 @@
 # 验收记录
 
-本文件记录 **0.1.9** 这一版实际跑出来的数字。所有数值都来自下面这条命令，
+本文件记录 **0.1.10** 这一版实际跑出来的数字。所有数值都来自下面这条命令，
 不是估算，也不是设计目标。
 
 ## 环境
@@ -19,30 +19,30 @@
 node tools/acceptance.mjs
 ```
 
-实际输出（2026-11-24）：
+实际输出（2026-11-25）：
 
 ```
-PASS  check          788 ms
-PASS  fmt            246 ms
+PASS  check          794 ms
+PASS  fmt            170 ms
 SKIP  test native    本机无 native 工具链
-PASS  test wasm-gc   10047 ms
-PASS  test js        15953 ms
-PASS  package        920 ms
-PASS  demo           1059 ms
-PASS  bench          826 ms
-PASS  build web      205 ms
-PASS  wasm selftest  410 ms
-PASS  wasm scene     1574 ms
-PASS  guard check    1901 ms
-PASS  volume check   3512 ms
+PASS  test wasm-gc   8418 ms
+PASS  test js        17851 ms
+PASS  package        1281 ms
+PASS  demo           1017 ms
+PASS  bench          847 ms
+PASS  build web      270 ms
+PASS  wasm selftest  396 ms
+PASS  wasm scene     1312 ms
+PASS  guard check    2107 ms
+PASS  volume check   3288 ms
 
 没有失败项（共 13 项）
 ```
 
 毫秒列随机器负载浮动，判定只看 PASS / SKIP 两列。
 
-`test wasm-gc` / `test js` 内部都是 `Total tests: 63, passed: 63, failed: 0.`
-——源码里 63 个 `test` 块，当前工具链按块计数（一块一个用例），块内逐条
+`test wasm-gc` / `test js` 内部都是 `Total tests: 66, passed: 66, failed: 0.`
+——源码里 66 个 `test` 块，当前工具链按块计数（一块一个用例），块内逐条
 `assert_*` 断言，任一条红整块就红。
 
 ## 可打印保证：输入条件与拒绝语义
@@ -61,16 +61,18 @@ CLI 默认走它，错误以非零退出码表达，不产出文件。
 `node tools/guard_check.mjs` 用真实 CLI 输入把这张表钉死（CI 第 13 项）：
 
 ```
-场景                    耗时      判定
---------------------  ------  --
-正常球（自动采样域）            462 ms  ✓
-半空间：无界，拒绝             151 ms  ✓
-半空间 + 有界域：穿过边界，拒绝     158 ms  ✓
-域小于实体：拒绝              160 ms  ✓
-同一输入加 --clip：输出并声明开口  525 ms  ✓
-域离实体很远：拒绝             250 ms  ✓
+场景                                  耗时      判定
+----------------------------------  ------  --
+正常球（自动采样域）                          317 ms  ✓
+正常球 --audit：stdout 是纯 JSON 且字段自洽    241 ms  ✓
+裁剪网格 --audit：watertight=false 且带告警  323 ms  ✓
+半空间：无界，拒绝                           134 ms  ✓
+半空间 + 有界域：穿过边界，拒绝                   141 ms  ✓
+域小于实体：拒绝                            143 ms  ✓
+同一输入加 --clip：输出并声明开口                486 ms  ✓
+域离实体很远：拒绝                           212 ms  ✓
 
-通过：6/6 个边界场景
+通过：8/8 个边界场景
 ```
 
 具体到几条命令：
@@ -78,6 +80,7 @@ CLI 默认走它，错误以非零退出码表达，不产出文件。
 | 命令 | 退出码 | 关键输出 |
 | --- | --- | --- |
 | `sphere 10 --stats` | 0 | `watertight: true`、`open_edges: 0` |
+| `sphere 10 --audit` | 0 | stdout 是纯 JSON：`shells: 1`、`genus: 0`、`warnings: []` |
 | `sphere 10 --bounds -10.5,-10.5,-10.5,2,10.5,10.5 --stats` | 1 | 采样域被实体穿过：边界点场值 `-0.015` |
 | 同上加 `--clip` | 0 | `watertight: false`、`open_edges: 402` |
 | `plane 0 0 1 0 --stats` | 1 | 没有有限包围盒 |

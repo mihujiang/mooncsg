@@ -520,3 +520,40 @@ test "empty mesh and mesh without triangles are manifold" {
   let m = @mooncsg.Mesh::new(positions, [])
   assert_true(m.is_manifold())
 }
+
+///|
+test "shell helpers and audit handle empty, split and non-finite meshes" {
+  // 空网格：没有壳，`largest_shell` 返回空网格而不是越界。
+  let empty = @mooncsg.Mesh::empty()
+  assert_eq(empty.shell_count(), 0)
+  assert_eq(empty.shells().length(), 0)
+  assert_true(empty.largest_shell().is_empty())
+  // 两个三角形只共用一个顶点：按「共享一条边」判是两个壳，各自重编顶点后
+  // 只留下自己用到的 3 个顶点（原网格 5 个）。
+  let positions : Array[@mooncsg.Vec3] = [
+    @mooncsg.Vec3::new(0.0, 0.0, 0.0),
+    @mooncsg.Vec3::new(1.0, 0.0, 0.0),
+    @mooncsg.Vec3::new(0.0, 1.0, 0.0),
+    @mooncsg.Vec3::new(0.0, -1.0, 0.0),
+    @mooncsg.Vec3::new(-1.0, 0.0, 0.0),
+  ]
+  let split = @mooncsg.Mesh::new(positions, [0, 1, 2, 0, 3, 4])
+  assert_eq(split.shell_count(), 2)
+  let parts = split.shells()
+  assert_eq(parts.length(), 2)
+  for part in parts {
+    assert_eq(part.triangle_count(), 1)
+    assert_eq(part.vertex_count(), 3)
+  }
+  // 非有限值必须写成 JSON 的 null，否则 `--audit` 产出的是非法 JSON。
+  // 1e308 的坐标让叉积溢出成 Inf，正好走到 `json_num` 的另一条分支。
+  let huge = @mooncsg.Mesh::new(
+    [
+      @mooncsg.Vec3::splat(1.0e308),
+      @mooncsg.Vec3::splat(-1.0e308),
+      @mooncsg.Vec3::splat(1.0e308),
+    ],
+    [0, 1, 2],
+  )
+  assert_true(huge.audit().to_json().contains("\"volume\": null"))
+}

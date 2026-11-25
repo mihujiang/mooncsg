@@ -31,6 +31,28 @@ const cases = [
     want: ["watertight: true", "open_edges: 0"],
     open: false,
   },
+  // `--audit` 的契约是「stdout 只有一份 JSON」：JSON.parse 整个 stdout 能过，
+  // 就说明没有指标行混进去（这个工具链的 eprintln 与 stdout 同流，很容易混）。
+  {
+    name: "正常球 --audit：stdout 是纯 JSON 且字段自洽",
+    args: ["sphere", "10", "--res", "32", "--audit"],
+    code: 0,
+    json: {
+      shells: 1,
+      euler: 2,
+      genus: 0,
+      watertight: true,
+      manifold: true,
+      warnings: 0,
+    },
+  },
+  {
+    name: "裁剪网格 --audit：watertight=false 且带告警",
+    args: ["sphere", "10", ...CLIPPED_DOMAIN, "--clip", "--audit"],
+    code: 0,
+    json: { watertight: false },
+    warningsAtLeast: 1,
+  },
   {
     name: "半空间：无界，拒绝",
     args: ["plane", "0", "0", "1", "0", "--stats"],
@@ -81,12 +103,40 @@ for (const c of cases) {
   if (r.status !== c.code) {
     problems.push(`退出码 ${r.status}（期望 ${c.code}）`);
   }
-  for (const want of c.want) {
+  for (const want of c.want ?? []) {
     if (!out.includes(want)) problems.push(`缺少 "${want}"`);
   }
   if (c.open) {
     const m = out.match(/open_edges:\s*(\d+)/);
     if (!m || Number(m[1]) <= 0) problems.push("open_edges 不是正数");
+  }
+  if (c.json) {
+    let j;
+    try {
+      // 只解析 stdout：stderr 混进来就不该算「纯 JSON」。
+      j = JSON.parse(r.stdout ?? "");
+    } catch (e) {
+      problems.push(`stdout 不是纯 JSON（${String(e && e.message).slice(0, 60)}）`);
+    }
+    if (j) {
+      for (const [k, v] of Object.entries(c.json)) {
+        const actual =
+          k === "warnings" && Array.isArray(j.warnings) ? j.warnings.length : j[k];
+        if (actual !== v) problems.push(`${k}=${JSON.stringify(actual)}（期望 ${v}）`);
+      }
+      if (typeof j.volume !== "number" || !(j.volume > 0)) {
+        problems.push("volume 不是正数");
+      }
+      if (!j.bounds || !Array.isArray(j.bounds.min) || j.bounds.min.length !== 3) {
+        problems.push("bounds 不是 {min:[3],max:[3]}");
+      }
+      if (
+        c.warningsAtLeast &&
+        (!Array.isArray(j.warnings) || j.warnings.length < c.warningsAtLeast)
+      ) {
+        problems.push(`warnings 少于 ${c.warningsAtLeast} 条`);
+      }
+    }
   }
 
   const ok = problems.length === 0;
