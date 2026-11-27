@@ -8,10 +8,17 @@
 | 项 | 值 |
 | --- | --- |
 | 系统 | Windows 11 |
-| MoonBit | 0.1.20261021（`MOON_HOME=D:\mb`） |
-| core | 0.10.17 |
+| MoonBit（本地） | 0.1.20261021（`MOON_HOME=D:\mb`） |
+| core（本地） | 0.10.17 |
+| **CI 工具链** | **moon 0.1.20261126 / moonc v1.0.0-rc1+3c0520448** |
 | Node | v24（wasm-gc / js 都跑在 V8 上） |
 | native 后端 | **本机不可用**（没装 MSVC Build Tools），相关项判 SKIP |
+
+本地那套停在 0.1.20261021 是硬限制：Windows 上对捆绑的 core 源码跑 `moon bundle`
+会报 210 个类型错误，升不上去；所以**正确性口径以 CI 的 moonc 1.0.0-rc1 为准**，
+本地只用来跑 `tools/acceptance.mjs` 里那些不依赖编译器版本的门禁（volume / guard /
+wasm）。CI 在 `ad014dc`（工具链刷到 1.0.0-rc1 之后）一次全绿，check / fmt /
+三后端 test / build / package 都过。
 
 ## 一条命令
 

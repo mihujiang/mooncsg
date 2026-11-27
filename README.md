@@ -42,7 +42,7 @@ marching tetrahedra 网格化、OBJ / STL 导出。没有 FFI，没有第三方�
 
 ## 安装
 
-已发布到 mooncakes（`weopqrst/mooncsg@0.1.10`）：
+已发布到 mooncakes（`weopqrst/mooncsg@0.1.11`）：
 
 ```bash
 moon add weopqrst/mooncsg
@@ -52,9 +52,12 @@ moon add weopqrst/mooncsg
 
 ```moonbit
 import {
-  "weopqrst/mooncsg@0.1.10",
+  "weopqrst/mooncsg@0.1.11",
 }
 ```
+
+要求 moonc ≥ 1.0.0-rc1（`core` 的 1.0.0-rc1 起；0.1.11 就是在这套工具链上验证过
+的那一版）。
 
 再在调用方包的 `moon.pkg` 里加 `"weopqrst/mooncsg"`，即可用 `@mooncsg.` 前缀调用。
 
@@ -275,6 +278,10 @@ exit 0），所以 CI 里跑的是后者，超差直接红。
 latest → 存新缓存）。动机是 0.1.6：上游新增的弃用诊断会在没有代码改动时把
 `--deny-warn` 打红。缓存在 7 天不活跃后被清掉，那时会自动回到 latest，版本号
 变化会打在 notice 里。
+
+当前冻结的是 **moon 0.1.20261126 / moonc v1.0.0-rc1**：`core` 的 1.0.0-rc1
+（11-25）发布后，CI 在 `ad014dc` 上用这套工具链把 check / fmt / 三后端 test /
+build / package 跑了一遍全绿，所以 0.1.11 这一版是「在 1.0.0-rc1 上验证过」的。
 
 ## 设计要点
 

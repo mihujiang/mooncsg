@@ -2,6 +2,30 @@
 
 按里程碑记录，每条都挂 commit。版本号按 mooncakes 的 0.x 规则走。
 
+## 0.1.11 — 2026-11-27
+
+**没有改代码**：这一版只是把「在 moonc 1.0.0-rc1 上验证过」这件事固定下来。
+
+### 工程
+
+- **工具链升到 moonc v1.0.0-rc1**。`moonbitlang/core` 的 `1.0.0-rc1` 于 11-25
+  发布，把 CI 的 `TOOLCHAIN_STAMP` 刷到 11-27 之后，CI 拿到的是
+  `moon 0.1.20261126` / `moonc v1.0.0-rc1+3c0520448`。
+- 在这套工具链上 `check --deny-warn`、`fmt`、三后端 `test`、`build native`、
+  `package`、wasm 两端、demo、bench、volume check、guard check **一次全绿**
+  （CI #27，`ad014dc`），没有一个弃用诊断——依赖面只有
+  `moonbitlang/core/buffer` 与 `moonbitlang/core/hashmap`，没有 `} derive(...)`
+  与 `String::view`，正好避开了 1.0 的两类新诊断。
+- 因为源码与 0.1.10 完全一致，这版的实质是**重新发布一份在 1.0.0-rc1 上验证过
+  的包**，让「兼容的最低编译器版本」有据可查。
+
+### 文档
+
+- `ACCEPTANCE.md` 的环境表补 CI 工具链一行，并写清本地为什么停在
+  0.1.20261021（Windows 上对捆绑 core 跑 `moon bundle` 会报 210 个类型错误）：
+  正确性口径以 CI 的 1.0.0-rc1 为准，本地只跑不依赖编译器版本的验收项。
+- README 的安装一节注明要求 `moonc ≥ 1.0.0-rc1`，工具链一节记下当前冻结版本。
+
 ## 0.1.10 — 2026-11-25
 
 没有改几何算法，只有三类收尾：测试盲区、性能基线、CI 工具链。
