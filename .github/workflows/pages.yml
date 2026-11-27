@@ -30,7 +30,7 @@ jobs:
     # 工具链缓存的键，与 ci.yml 的 TOOLCHAIN_STAMP 保持一致（那里写了为什么
     # 只能缓存、不能按版本号钉；升级时两边一起改日期）。
     env:
-      TOOLCHAIN_STAMP: "2026-11-25"
+      TOOLCHAIN_STAMP: "2026-11-27"
     steps:
       - uses: actions/checkout@v4
 

@@ -15,7 +15,7 @@ on:
 # （0.1.6 就是这么红的）。缓存 7 天不活跃会被清掉，那时自动回到 latest——
 # 版本号变化会以 notice 打出来，不静默。
 env:
-  TOOLCHAIN_STAMP: "2026-11-25"
+  TOOLCHAIN_STAMP: "2026-11-27"
 
 jobs:
   test:
